@@ -298,47 +298,50 @@ async def run_bot_async():
     try:
         retry_count = 0
         max_retries = 3
-        while retry_count < max_retries:
-            try:
-                bot_info = await application.bot.get_me()
-                logger.info(f"🤖 Bot @{bot_info.username} is starting... (Attempt {retry_count + 1})")
-                await application.initialize()
-                await application.start()
-                await application.updater.start_polling(
-                    drop_pending_updates=True,
-                    allowed_updates=Update.ALL_TYPES
-                )
-                bot_running = True
-                logger.info("🚀 Bot is now running with auto-reply enabled!")
-                while bot_running:
-                    await asyncio.sleep(1)
-                break  # Exit retry loop if successful
-            except Conflict as e:
-                retry_count += 1
-                logger.error(f"❌ Conflict error (attempt {retry_count}): {e}")
-                if retry_count < max_retries:
-                    wait_time = retry_count * 10
-                    logger.info(f"⏳ Waiting {wait_time} seconds before retry...")
-                    await asyncio.sleep(wait_time)
-                    await clear_existing_webhooks()
-                    await asyncio.sleep(5)
-                else:
-                    logger.error("❌ Max retries reached. Bot startup failed.")
-            except (TimedOut, NetworkError) as e:
-                logger.error(f"⚠️ Network error: {e}")
-                await asyncio.sleep(5)
-                continue
-            except Exception as e:
-                logger.error(f"❌ Bot error: {e}")
-                break
-    finally:
-        bot_running = False
         try:
-            if application:
-                await application.stop()
-                logger.info("🛑 Bot stopped")
-        except:
-            pass
+            while retry_count < max_retries:
+                try:
+                    bot_info = await application.bot.get_me()
+                    logger.info(f"🤖 Bot @{bot_info.username} is starting... (Attempt {retry_count + 1})")
+                    await application.initialize()
+                    await application.start()
+                    await application.updater.start_polling(
+                        drop_pending_updates=True,
+                        allowed_updates=Update.ALL_TYPES
+                    )
+                    bot_running = True
+                    logger.info("🚀 Bot is now running with auto-reply enabled!")
+                    while bot_running:
+                        await asyncio.sleep(1)
+                    break  # Exit retry loop if successful
+                except Conflict as e:
+                    retry_count += 1
+                    logger.error(f"❌ Conflict error (attempt {retry_count}): {e}")
+                    if retry_count < max_retries:
+                        wait_time = retry_count * 10
+                        logger.info(f"⏳ Waiting {wait_time} seconds before retry...")
+                        await asyncio.sleep(wait_time)
+                        await clear_existing_webhooks()
+                        await asyncio.sleep(5)
+                    else:
+                        logger.error("❌ Max retries reached. Bot startup failed.")
+                except (TimedOut, NetworkError) as e:
+                    logger.error(f"⚠️ Network error: {e}")
+                    await asyncio.sleep(5)
+                    continue
+                except Exception as e:
+                    logger.error(f"❌ Bot error: {e}")
+                    break
+        finally:
+            bot_running = False
+            try:
+                if application:
+                    await application.stop()
+                    logger.info("🛑 Bot stopped")
+            except Exception:
+                pass
+    except Exception as e:
+        logger.error(f"❌ Unhandled exception in run_bot_async: {e}")
 
 def run_bot_thread():
     logger.info("🧵 Starting bot thread...")
