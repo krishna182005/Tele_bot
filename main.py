@@ -214,7 +214,8 @@ def get_user_session(user_id):
             "message_count": 0,
             "current_context": None,
             "user_info": {},
-            "last_order": None
+            "last_order": None,
+            "checkout_data": {}
         }
     return user_sessions[user_id]
 
@@ -292,12 +293,12 @@ def save_order(user_id, order_data):
     
     return order_id
 
-# --- MAIN MENU KEYBOARD ---
+# --- MAIN MENU KEYBOARD (REMOVED OFFERS BUTTON) ---
 def get_main_menu_keyboard():
     keyboard = [
         [KeyboardButton("🛒 Browse Products"), KeyboardButton("🛍️ View Cart")],
         [KeyboardButton("📦 My Orders"), KeyboardButton("ℹ️ About Us")],
-        [KeyboardButton("📞 Contact Support"), KeyboardButton("💰 Offers")]
+        [KeyboardButton("📞 Contact Support")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
 
@@ -351,7 +352,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 **ℹ️ Information:**
 • About Us - Learn about Trusty Lads
 • Contact Support - Get help from our team
-• Offers - View current promotions
 
 **💡 How to Shop:**
 1. **Browse** - Select "🛒 Browse Products"
@@ -394,7 +394,11 @@ Choose a category to browse our premium products:
 💡 *Click a category below to see available products*
     """
     
-    await update.message.reply_text(catalog_text, parse_mode='Markdown', reply_markup=reply_markup)
+    # Handle both message and callback query
+    if hasattr(update, 'callback_query') and update.callback_query:
+        await update.callback_query.edit_message_text(catalog_text, parse_mode='Markdown', reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(catalog_text, parse_mode='Markdown', reply_markup=reply_markup)
 
 async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -407,11 +411,13 @@ async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await update.message.reply_text(
-            "🛍️ **Your Cart is Empty**\n\nStart shopping to add items to your cart!",
-            parse_mode='Markdown',
-            reply_markup=reply_markup
-        )
+        cart_text = "🛍️ **Your Cart is Empty**\n\nStart shopping to add items to your cart!"
+        
+        # Handle both message and callback query
+        if hasattr(update, 'callback_query') and update.callback_query:
+            await update.callback_query.edit_message_text(cart_text, parse_mode='Markdown', reply_markup=reply_markup)
+        else:
+            await update.message.reply_text(cart_text, parse_mode='Markdown', reply_markup=reply_markup)
         return
     
     cart_text = "🛍️ **Your Shopping Cart**\n\n"
@@ -432,7 +438,11 @@ async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text(cart_text, parse_mode='Markdown', reply_markup=reply_markup)
+    # Handle both message and callback query
+    if hasattr(update, 'callback_query') and update.callback_query:
+        await update.callback_query.edit_message_text(cart_text, parse_mode='Markdown', reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(cart_text, parse_mode='Markdown', reply_markup=reply_markup)
 
 async def my_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -445,11 +455,13 @@ async def my_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await update.message.reply_text(
-            "📦 **No Orders Yet**\n\nYou haven't placed any orders yet. Start shopping to see your orders here!",
-            parse_mode='Markdown',
-            reply_markup=reply_markup
-        )
+        orders_text = "📦 **No Orders Yet**\n\nYou haven't placed any orders yet. Start shopping to see your orders here!"
+        
+        # Handle both message and callback query
+        if hasattr(update, 'callback_query') and update.callback_query:
+            await update.callback_query.edit_message_text(orders_text, parse_mode='Markdown', reply_markup=reply_markup)
+        else:
+            await update.message.reply_text(orders_text, parse_mode='Markdown', reply_markup=reply_markup)
         return
     
     orders_text = "📦 **Your Order History**\n\n"
@@ -467,7 +479,11 @@ async def my_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text(orders_text, parse_mode='Markdown', reply_markup=reply_markup)
+    # Handle both message and callback query
+    if hasattr(update, 'callback_query') and update.callback_query:
+        await update.callback_query.edit_message_text(orders_text, parse_mode='Markdown', reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(orders_text, parse_mode='Markdown', reply_markup=reply_markup)
 
 async def about_us(update: Update, context: ContextTypes.DEFAULT_TYPE):
     about_text = f"""
@@ -503,7 +519,11 @@ Thank you for choosing Trusty Lads! 🙏
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text(about_text, parse_mode='Markdown', reply_markup=reply_markup)
+    # Handle both message and callback query
+    if hasattr(update, 'callback_query') and update.callback_query:
+        await update.callback_query.edit_message_text(about_text, parse_mode='Markdown', reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(about_text, parse_mode='Markdown', reply_markup=reply_markup)
 
 async def contact_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
     support_text = f"""
@@ -538,44 +558,32 @@ async def contact_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Need immediate help? Call us now! 📞
     """
     
+    # Clean phone number for URL
+    clean_phone = COMPANY_INFO['whatsapp'].replace(' ', '').replace('(', '').replace(')', '').replace('-', '').replace('+', '')
+    
     keyboard = [
         [InlineKeyboardButton("📞 Call Now", url=f"tel:{COMPANY_INFO['phone']}")],
-        [InlineKeyboardButton("💬 WhatsApp", url=f"https://wa.me/{COMPANY_INFO['whatsapp'].replace(' ', '').replace('(', '').replace(')', '').replace('-', '')}")],
+        [InlineKeyboardButton("💬 WhatsApp", url=f"https://wa.me/{clean_phone}")],
         [InlineKeyboardButton("📧 Send Email", url=f"mailto:{COMPANY_INFO['email']}")],
         [InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_menu")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text(support_text, parse_mode='Markdown', reply_markup=reply_markup)
-
-async def view_offers(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    offers_text = "💰 **Current Offers & Promotions**\n\n"
-    
-    for code, offer in ACTIVE_OFFERS.items():
-        offers_text += f"🎁 **{code}**\n"
-        offers_text += f"   {offer['description']}\n"
-        if offer['min_order'] > 0:
-            offers_text += f"   Minimum order: ${offer['min_order']}\n"
-        offers_text += f"   Discount: {offer['discount']}% off\n\n"
-    
-    offers_text += "💡 **How to Use:**\n"
-    offers_text += "1. Add items to your cart\n"
-    offers_text += "2. Proceed to checkout\n"
-    offers_text += "3. Enter the promo code when asked\n"
-    offers_text += "4. Enjoy your discount!\n\n"
-    offers_text += "*Terms and conditions apply. Offers may expire without notice.*"
-    
-    keyboard = [
-        [InlineKeyboardButton("🛒 Start Shopping", callback_data="browse_products")],
-        [InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_menu")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await update.message.reply_text(offers_text, parse_mode='Markdown', reply_markup=reply_markup)
+    # Handle both message and callback query
+    if hasattr(update, 'callback_query') and update.callback_query:
+        await update.callback_query.edit_message_text(support_text, parse_mode='Markdown', reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(support_text, parse_mode='Markdown', reply_markup=reply_markup)
 
 # --- CALLBACK QUERY HANDLERS ---
 async def handle_category_selection(update: Update, category_id: str):
     query = update.callback_query
+    
+    # Check if category exists
+    if category_id not in PRODUCT_CATALOG:
+        await query.edit_message_text("❌ Category not found. Please try again.")
+        return
+    
     category_data = PRODUCT_CATALOG[category_id]
     
     keyboard = []
@@ -599,6 +607,12 @@ async def handle_category_selection(update: Update, category_id: str):
 
 async def handle_product_selection(update: Update, category_id: str, product_id: str):
     query = update.callback_query
+    
+    # Check if category and product exist
+    if category_id not in PRODUCT_CATALOG or product_id not in PRODUCT_CATALOG[category_id]["products"]:
+        await query.edit_message_text("❌ Product not found. Please try again.")
+        return
+    
     product = PRODUCT_CATALOG[category_id]["products"][product_id]
     
     keyboard = [
@@ -623,6 +637,11 @@ async def handle_product_selection(update: Update, category_id: str, product_id:
 async def handle_add_to_cart(update: Update, category_id: str, product_id: str):
     query = update.callback_query
     user_id = query.from_user.id
+    
+    # Check if category and product exist
+    if category_id not in PRODUCT_CATALOG or product_id not in PRODUCT_CATALOG[category_id]["products"]:
+        await query.edit_message_text("❌ Product not found. Please try again.")
+        return
     
     added_item = add_to_cart(user_id, category_id, product_id)
     cart_total = calculate_cart_total(user_id)
@@ -658,6 +677,7 @@ async def start_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     session = get_user_session(user_id)
     session['current_context'] = "checkout_name"
+    session['checkout_data'] = {}
     
     cart_summary = "🛍️ **Order Summary:**\n\n"
     total = 0
@@ -681,12 +701,16 @@ async def start_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def process_checkout_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     session = get_user_session(user_id)
-    message_text = update.message.text
+    message_text = update.message.text.strip()
     
     current_context = session.get('current_context')
     
     if current_context == "checkout_name":
-        session['checkout_data'] = {"full_name": message_text}
+        if not message_text:
+            await update.message.reply_text("Please enter a valid name.")
+            return
+            
+        session['checkout_data']['full_name'] = message_text
         session['current_context'] = "checkout_phone"
         
         await update.message.reply_text(
@@ -695,6 +719,10 @@ async def process_checkout_step(update: Update, context: ContextTypes.DEFAULT_TY
         )
     
     elif current_context == "checkout_phone":
+        if not message_text:
+            await update.message.reply_text("Please enter a valid phone number.")
+            return
+            
         session['checkout_data']['phone'] = message_text
         session['current_context'] = "checkout_address"
         
@@ -704,6 +732,10 @@ async def process_checkout_step(update: Update, context: ContextTypes.DEFAULT_TY
         )
     
     elif current_context == "checkout_address":
+        if not message_text:
+            await update.message.reply_text("Please enter a valid address.")
+            return
+            
         session['checkout_data']['address'] = message_text
         session['current_context'] = "checkout_payment"
         
@@ -768,7 +800,7 @@ async def finalize_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     session = get_user_session(user_id)
     cart = get_user_cart(user_id)
-    checkout_data = session['checkout_data']
+    checkout_data = session.get('checkout_data', {})
     
     # Prepare order data
     cart_items = []
@@ -787,10 +819,10 @@ async def finalize_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     discount = checkout_data.get('discount', 0)
     
     order_data = {
-        "full_name": checkout_data['full_name'],
-        "phone": checkout_data['phone'],
-        "address": checkout_data['address'],
-        "payment_method": checkout_data['payment_method'],
+        "full_name": checkout_data.get('full_name', 'N/A'),
+        "phone": checkout_data.get('phone', 'N/A'),
+        "address": checkout_data.get('address', 'N/A'),
+        "payment_method": checkout_data.get('payment_method', 'N/A'),
         "items": cart_items,
         "subtotal": subtotal,
         "discount": discount,
@@ -803,15 +835,16 @@ async def finalize_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     clear_user_cart(user_id)
     session['current_context'] = "main_menu"
     session['last_order'] = order_id
+    session['checkout_data'] = {}
     
     # Send confirmation
     confirmation_text = f"✅ **Order Confirmed!**\n\n"
     confirmation_text += f"**Order ID:** {order_id}\n"
     confirmation_text += f"**Date:** {datetime.now().strftime('%B %d, %Y')}\n"
-    confirmation_text += f"**Customer:** {checkout_data['full_name']}\n"
-    confirmation_text += f"**Phone:** {checkout_data['phone']}\n"
-    confirmation_text += f"**Address:** {checkout_data['address']}\n"
-    confirmation_text += f"**Payment:** {checkout_data['payment_method']}\n\n"
+    confirmation_text += f"**Customer:** {checkout_data.get('full_name', 'N/A')}\n"
+    confirmation_text += f"**Phone:** {checkout_data.get('phone', 'N/A')}\n"
+    confirmation_text += f"**Address:** {checkout_data.get('address', 'N/A')}\n"
+    confirmation_text += f"**Payment:** {checkout_data.get('payment_method', 'N/A')}\n\n"
     
     confirmation_text += "📦 **Items Ordered:**\n"
     for item in cart_items:
@@ -837,10 +870,7 @@ async def finalize_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    if hasattr(update, 'callback_query') and update.callback_query:
-        await update.callback_query.edit_message_text(confirmation_text, parse_mode='Markdown', reply_markup=reply_markup)
-    else:
-        await update.message.reply_text(confirmation_text, parse_mode='Markdown', reply_markup=reply_markup)
+    await update.message.reply_text(confirmation_text, parse_mode='Markdown', reply_markup=reply_markup)
 
 # --- MAIN CALLBACK QUERY HANDLER ---
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -850,43 +880,83 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     user_id = query.from_user.id
     
-    if data.startswith("category_"):
-        category_id = data.split("_")[1]
-        await handle_category_selection(update, category_id)
-    
-    elif data.startswith("product_"):
-        parts = data.split("_")
-        category_id, product_id = parts[1], parts[2]
-        await handle_product_selection(update, category_id, product_id)
-    
-    elif data.startswith("add_cart_"):
-        parts = data.split("_")
-        category_id, product_id = parts[2], parts[3]
-        await handle_add_to_cart(update, category_id, product_id)
-    
-    elif data == "browse_products":
-        await browse_products(update, context)
-    
-    elif data == "view_cart":
-        await view_cart(update, context)
-    
-    elif data == "clear_cart":
-        clear_user_cart(user_id)
-        await query.edit_message_text("🗑️ **Cart Cleared!**\n\nYour shopping cart is now empty.")
-    
-    elif data == "start_checkout":
-        await start_checkout(update, context)
-    
-    elif data.startswith("payment_"):
-        payment_method = "Cash on Delivery" if data == "payment_cod" else "Online Payment"
-        await handle_payment_selection(update, payment_method)
-    
-    elif data == "back_to_menu":
-        reply_markup = get_main_menu_keyboard()
-        await query.edit_message_text(
-            "🏠 **Main Menu**\n\nUse the buttons below to navigate:",
-            parse_mode='Markdown'
-        )
+    try:
+        if data.startswith("category_"):
+            category_id = data.split("_", 1)[1]
+            await handle_category_selection(update, category_id)
+        
+        elif data.startswith("product_"):
+            parts = data.split("_")
+            if len(parts) >= 3:
+                category_id, product_id = parts[1], "_".join(parts[2:])
+                await handle_product_selection(update, category_id, product_id)
+        
+        elif data.startswith("add_cart_"):
+            parts = data.split("_")
+            if len(parts) >= 4:
+                category_id, product_id = parts[2], "_".join(parts[3:])
+                await handle_add_to_cart(update, category_id, product_id)
+        
+        elif data == "browse_products":
+            await browse_products(update, context)
+        
+        elif data == "view_cart":
+            await view_cart(update, context)
+        
+        elif data == "clear_cart":
+            clear_user_cart(user_id)
+            keyboard = [
+                [InlineKeyboardButton("🛒 Start Shopping", callback_data="browse_products")],
+                [InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_menu")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(
+                "🗑️ **Cart Cleared!**\n\nYour shopping cart is now empty.",
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            )
+        
+        elif data == "start_checkout":
+            await start_checkout(update, context)
+        
+        elif data.startswith("payment_"):
+            payment_method = "Cash on Delivery" if data == "payment_cod" else "Online Payment"
+            await handle_payment_selection(update, payment_method)
+        
+        elif data == "contact_support":
+            await contact_support(update, context)
+        
+        elif data == "back_to_menu":
+            keyboard = [
+                [InlineKeyboardButton("🛒 Browse Products", callback_data="browse_products")],
+                [InlineKeyboardButton("🛍️ View Cart", callback_data="view_cart")],
+                [InlineKeyboardButton("📦 My Orders", callback_data="my_orders")],
+                [InlineKeyboardButton("ℹ️ About Us", callback_data="about_us")],
+                [InlineKeyboardButton("📞 Contact Support", callback_data="contact_support")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(
+                "🏠 **Main Menu**\n\nUse the buttons below to navigate:",
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            )
+        
+        elif data == "my_orders":
+            await my_orders(update, context)
+        
+        elif data == "about_us":
+            await about_us(update, context)
+        
+        elif data.startswith("track_"):
+            order_id = data.split("_", 1)[1]
+            await query.edit_message_text(
+                f"📦 **Order Tracking**\n\nOrder ID: {order_id}\nStatus: Confirmed\n\nYour order is being processed and will be shipped within 1-2 business days.",
+                parse_mode='Markdown'
+            )
+        
+    except Exception as e:
+        logger.error(f"Error in button_callback: {e}")
+        await query.edit_message_text("❌ An error occurred. Please try again.")
 
 # --- MESSAGE HANDLER FOR MENU BUTTONS ---
 async def handle_menu_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -910,8 +980,6 @@ async def handle_menu_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE
         await about_us(update, context)
     elif message_text == "📞 Contact Support":
         await contact_support(update, context)
-    elif message_text == "💰 Offers":
-        await view_offers(update, context)
     else:
         # Default response for unknown messages
         await update.message.reply_text(
