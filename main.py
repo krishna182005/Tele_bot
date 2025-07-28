@@ -10,25 +10,17 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-# Your bot token from @BotFather (stored securely in .env file or Replit Secrets)
+# Your bot token from @BotFather (stored securely in .env file or environment)
 BOT_TOKEN = os.getenv('BOT_TOKEN', os.environ.get('BOT_TOKEN', 'PASTE_YOUR_TOKEN_HERE'))
 
 # Validate bot token
 if BOT_TOKEN == 'PASTE_YOUR_TOKEN_HERE' or not BOT_TOKEN:
     print("❌ ERROR: Bot token not found!")
-    print("🔐 Please set BOT_TOKEN in one of these ways:")
-    print("   Option 1 - Create .env file:")
-    print("     1. Create a file named '.env' in your project folder")
-    print("     2. Add this line: BOT_TOKEN=your_actual_bot_token")
-    print("   Option 2 - Use Replit Secrets:")
-    print("     1. Click the 🔐 Lock icon in the left sidebar")
-    print("     2. Add key: BOT_TOKEN")
-    print("     3. Add value: Your bot token from @BotFather")
-    print("   4. Restart the bot")
+    print("🔐 Please set BOT_TOKEN in environment variables or .env file")
     exit(1)
 
 # Flask app for 24/7 hosting
-app_flask = Flask('')
+app_flask = Flask(__name__)
 
 @app_flask.route('/')
 def home():
@@ -48,7 +40,7 @@ def home():
     """
 
 def run_flask():
-    app_flask.run(host='0.0.0.0', port=8080)
+    app_flask.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
 
 def keep_alive():
     """Starts Flask server in a separate thread to keep bot alive 24/7"""
@@ -460,7 +452,7 @@ async def process_order(update: Update, context: ContextTypes.DEFAULT_TYPE, user
     total = sum(item['price'] * item['quantity'] for item in cart)
     
     # Generate order ID
-    order_id = "TL{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+    order_id = f"TL{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
     
     # Get user name safely
     user_name = "Unknown"
@@ -551,37 +543,54 @@ Use 📞 Contact Support for assistance!
     
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
-# Bot setup
+# Telegram bot function
+def run_telegram_bot():
+    """Run the Telegram bot in a separate thread"""
+    try:
+        application = ApplicationBuilder().token(BOT_TOKEN).build()
+        
+        # Add handlers
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler("help", help_command))
+        application.add_handler(CallbackQueryHandler(button_callback))
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
+        
+        print("🤖 Trusty Lads Bot is running...")
+        application.run_polling(drop_pending_updates=True)
+        
+    except Exception as e:
+        print(f"❌ Error starting Telegram bot: {e}")
+        print("🔍 Check if your BOT_TOKEN is correct")
+
+# Main function
 def main():
-    print("🔐 Checking bot token from secrets...")
+    print("🔐 Checking bot token...")
     
     # Verify token is properly loaded
     if not BOT_TOKEN or BOT_TOKEN == 'PASTE_YOUR_TOKEN_HERE':
-        print("❌ Bot token not found in secrets!")
+        print("❌ Bot token not found!")
         return
     
     print("✅ Bot token loaded successfully!")
     
-    # Keep bot alive 24/7 with Flask server
+    # Start Flask server for 24/7 hosting
     keep_alive()
     
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    # Start Telegram bot in a separate thread
+    bot_thread = Thread(target=run_telegram_bot)
+    bot_thread.daemon = True
+    bot_thread.start()
     
-    # Add handlers
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CallbackQueryHandler(button_callback))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
+    print("🌐 Bot is running on multiple platforms:")
+    print("   • Telegram Bot: ✅ Active")
+    print("   • Web Server: ✅ Active")
+    print("   • Ready for 24/7 hosting!")
     
-    print("🤖 Trusty Lads Bot is running 24/7...")
-    print("🌐 Web server running on: https://your-replit-url.repl.co")
-    print("📱 Setup UptimeRobot to ping the URL every 5 minutes!")
-    
+    # Keep the main thread alive
     try:
-        app.run_polling()
-    except Exception as e:
-        print(f"❌ Error starting bot: {e}")
-        print("🔍 Check if your BOT_TOKEN is correct in Replit Secrets")
+        bot_thread.join()
+    except KeyboardInterrupt:
+        print("\n👋 Bot stopped by user")
 
 if __name__ == "__main__":
     main()
