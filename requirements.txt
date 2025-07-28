@@ -1,4 +1,5 @@
-python-telegram-bot==20.8
+# requirements.txt
+python-telegram-bot==21.2
 flask
 python-dotenv
 waitress
