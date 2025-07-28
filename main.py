@@ -5,17 +5,25 @@ import datetime
 import os
 from flask import Flask
 from threading import Thread
+from dotenv import load_dotenv
 
-# Your bot token from @BotFather (stored securely in Replit Secrets)
-BOT_TOKEN = os.environ.get('BOT_TOKEN', 'PASTE_YOUR_TOKEN_HERE')
+# Load environment variables from .env file
+load_dotenv()
+
+# Your bot token from @BotFather (stored securely in .env file or Replit Secrets)
+BOT_TOKEN = os.getenv('BOT_TOKEN', os.environ.get('BOT_TOKEN', 'PASTE_YOUR_TOKEN_HERE'))
 
 # Validate bot token
 if BOT_TOKEN == 'PASTE_YOUR_TOKEN_HERE' or not BOT_TOKEN:
     print("❌ ERROR: Bot token not found!")
-    print("🔐 Please set BOT_TOKEN in Replit Secrets:")
-    print("   1. Click the 🔐 Lock icon in the left sidebar")
-    print("   2. Add key: BOT_TOKEN")
-    print("   3. Add value: Your bot token from @BotFather")
+    print("🔐 Please set BOT_TOKEN in one of these ways:")
+    print("   Option 1 - Create .env file:")
+    print("     1. Create a file named '.env' in your project folder")
+    print("     2. Add this line: BOT_TOKEN=your_actual_bot_token")
+    print("   Option 2 - Use Replit Secrets:")
+    print("     1. Click the 🔐 Lock icon in the left sidebar")
+    print("     2. Add key: BOT_TOKEN")
+    print("     3. Add value: Your bot token from @BotFather")
     print("   4. Restart the bot")
     exit(1)
 
@@ -87,6 +95,9 @@ if not os.path.exists("orders"):
 
 # Handle /start command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not update.message:
+        return
+    
     user_id = update.effective_user.id
     user_carts[user_id] = []
     user_states[user_id] = "main_menu"
@@ -117,6 +128,9 @@ Choose an option below to get started! 👇
 
 # Show product categories
 async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+        
     keyboard = []
     for category in PRODUCTS.keys():
         keyboard.append([InlineKeyboardButton(f"📂 {category}", callback_data=f"cat_{category}")])
@@ -148,6 +162,9 @@ async def show_products_in_category(query, category):
 
 # Handle cart operations
 async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not update.message:
+        return
+        
     user_id = update.effective_user.id
     cart = user_carts.get(user_id, [])
     
@@ -178,6 +195,9 @@ async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Show offers
 async def show_offers(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+        
     offers_text = """
 🎉 *Current Offers & Deals!* 🎉
 
@@ -194,6 +214,9 @@ async def show_offers(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Show about us
 async def about_us(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+        
     about_text = """
 ℹ️ *About Trusty Lads*
 
@@ -218,6 +241,9 @@ async def about_us(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Contact support
 async def contact_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+        
     contact_text = """
 📞 *Contact Support*
 
@@ -265,9 +291,15 @@ async def checkout(query, user_id):
 
 # Handle callback queries (inline button clicks)
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.callback_query or not update.effective_user:
+        return
+        
     query = update.callback_query
     user_id = update.effective_user.id
     data = query.data
+    
+    if not data:
+        return
     
     await query.answer()
     
@@ -280,9 +312,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_products_in_category(query, category)
     elif data.startswith("add_"):
         parts = data.split("_")
-        category = parts[1]
-        product_index = int(parts[2])
-        await add_to_cart(query, user_id, category, product_index)
+        if len(parts) >= 3:
+            category = parts[1]
+            try:
+                product_index = int(parts[2])
+                await add_to_cart(query, user_id, category, product_index)
+            except (ValueError, IndexError):
+                await query.edit_message_text("❌ Invalid product selection!")
     elif data == "clear_cart":
         user_carts[user_id] = []
         await query.edit_message_text("🗑️ Cart cleared successfully!")
@@ -344,7 +380,7 @@ async def show_categories_callback(query):
 
 # Enhanced message handler
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or not update.message.text:
+    if not update.message or not update.message.text or not update.effective_user:
         return
         
     text = update.message.text
@@ -379,6 +415,9 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Show user's order history
 async def show_my_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not update.message:
+        return
+        
     user_id = update.effective_user.id
     orders_file = f"orders/user_{user_id}_orders.json"
     
@@ -403,11 +442,14 @@ async def show_my_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await update.message.reply_text(text, parse_mode='Markdown')
     
-    except Exception as e:
+    except Exception:
         await update.message.reply_text("❌ Error loading orders. Please contact support.")
 
 # Process order details
 async def process_order(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id, order_details):
+    if not update.message:
+        return
+        
     cart = user_carts.get(user_id, [])
     
     if not cart:
@@ -418,7 +460,7 @@ async def process_order(update: Update, context: ContextTypes.DEFAULT_TYPE, user
     total = sum(item['price'] * item['quantity'] for item in cart)
     
     # Generate order ID
-    order_id = f"TL{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+    order_id = "TL{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
     
     # Get user name safely
     user_name = "Unknown"
@@ -486,6 +528,9 @@ async def process_order(update: Update, context: ContextTypes.DEFAULT_TYPE, user
 
 # Add help command
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+        
     help_text = """
 🆘 *Help & Commands*
 
