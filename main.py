@@ -428,7 +428,8 @@ async def add_to_cart(query, user_id, category, product_index):
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("🛒 View Cart", callback_data="view_cart")],
                     [InlineKeyboardButton("🛍️ Continue Shopping", callback_data=f"cat_{category}")]
-                ))
+                ])
+            )
             return
     
     # Add new product to cart
@@ -444,7 +445,8 @@ async def add_to_cart(query, user_id, category, product_index):
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🛒 View Cart", callback_data="view_cart")],
             [InlineKeyboardButton("🛍️ Continue Shopping", callback_data=f"cat_{category}")]
-        ]))
+        ])
+    )
 
 # Callback query handler
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -461,7 +463,17 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=get_main_menu_keyboard())
     
     elif data == "back_categories":
-        await show_categories(query, context)
+        keyboard = []
+        for category in PRODUCTS.keys():
+            keyboard.append([InlineKeyboardButton(f"📂 {category}", callback_data=f"cat_{category}")])
+        
+        keyboard.append([InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")])
+        
+        await query.edit_message_text(
+            "🛍️ *Browse Our Categories:*",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
     
     elif data.startswith("cat_"):
         category = data.replace("cat_", "")
@@ -484,7 +496,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_carts[user_id] = []
         await query.edit_message_text(
             "🗑️ Your cart has been cleared.",
-            reply_markup=get_main_menu_keyboard())
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🛍️ Browse Products", callback_data="back_categories")],
+                [InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")]
+            ])
+        )
     
     elif data == "checkout":
         await checkout(query, user_id)
