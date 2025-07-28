@@ -1,4 +1,4 @@
-# main.py - DIAGNOSTIC VERSION for debugging
+# main.py - FIXED VERSION for python-telegram-bot v20+
 import asyncio
 import os
 import logging
@@ -29,9 +29,9 @@ app = Flask(__name__)
 def home():
     return f"""
     <html>
-        <head><title>Trusty Lads Bot - Diagnostic</title></head>
+        <head><title>Trusty Lads Bot - Fixed</title></head>
         <body style="font-family: sans-serif; text-align: center; padding-top: 50px;">
-            <h1>🤖 Trusty Lads Bot - Diagnostic Mode</h1>
+            <h1>🤖 Trusty Lads Bot - Running</h1>
             <p>✅ Status: <strong style="color: green;">Flask Running</strong></p>
             <p>🔍 Bot Token: {'✅ Found' if BOT_TOKEN else '❌ Missing'}</p>
             <p>🔍 Port: {os.environ.get('PORT', 'Not set')}</p>
@@ -49,7 +49,7 @@ def health_check():
         "environment": os.environ.get('RENDER', 'local')
     }
 
-# --- SIMPLE BOT HANDLERS ---
+# --- BOT HANDLERS ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Simple start command with logging"""
     user = update.effective_user
@@ -70,9 +70,9 @@ async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info("🧪 Test command received")
     await update.message.reply_text("✅ Test successful! Bot is alive and responding.")
 
-# --- BOT SETUP ---
+# --- SIMPLIFIED BOT SETUP ---
 async def run_bot():
-    """Setup and run the Telegram bot with detailed logging"""
+    """Setup and run the Telegram bot - FIXED VERSION"""
     if not BOT_TOKEN:
         logger.error("❌ CRITICAL: BOT_TOKEN not found!")
         return
@@ -89,35 +89,18 @@ async def run_bot():
         application.add_handler(CommandHandler("test", test_command))
         logger.info("✅ Handlers registered")
         
-        # Test bot token by getting bot info
-        await application.initialize()
+        # Get bot info for verification
         bot_info = await application.bot.get_me()
-        logger.info(f"✅ Bot initialized successfully: @{bot_info.username}")
+        logger.info(f"✅ Bot verified: @{bot_info.username}")
         
-        await application.start()
-        logger.info("✅ Bot started")
-        
-        # Start polling
-        await application.updater.start_polling(drop_pending_updates=True)
-        logger.info("🚀 Bot is now polling for messages!")
-        
-        # Keep running
-        try:
-            await application.updater.idle()
-        except KeyboardInterrupt:
-            logger.info("⏹️ Bot stopped by user")
+        # Start polling - THIS IS THE SIMPLIFIED APPROACH
+        logger.info("🚀 Starting bot polling...")
+        await application.run_polling(drop_pending_updates=True)
         
     except Exception as e:
         logger.error(f"❌ CRITICAL BOT ERROR: {e}")
         import traceback
         traceback.print_exc()
-    
-    finally:
-        try:
-            await application.stop()
-            logger.info("🛑 Bot stopped cleanly")
-        except:
-            pass
 
 # --- FLASK RUNNER ---
 def run_flask():
@@ -147,7 +130,7 @@ def run_bot_in_thread():
 
 # --- MAIN EXECUTION ---
 if __name__ == '__main__':
-    logger.info("🚀 Starting Trusty Lads Bot (Diagnostic Mode)...")
+    logger.info("🚀 Starting Trusty Lads Bot (Fixed Version)...")
     
     # Start bot in background thread
     bot_thread = Thread(target=run_bot_in_thread, daemon=True)
