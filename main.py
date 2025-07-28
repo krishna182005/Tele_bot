@@ -1,13 +1,14 @@
 # main.py
 # --- IMPORTS ---
 from flask import Flask
-from threading import Thread
+import asyncio
 from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
 from dotenv import load_dotenv
 import os
 import json
 import datetime
+from threading import Thread
 
 # --- INITIAL SETUP ---
 load_dotenv()
@@ -271,29 +272,49 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "checkout":
         await checkout(query)
 
-# --- BOT AND SERVER EXECUTION ---
-
-def run_telegram_bot():
-    print("🤖 Starting Telegram bot polling...")
+# --- TELEGRAM BOT SETUP ---
+async def setup_bot():
+    """Setup and run the Telegram bot"""
+    print("🤖 Starting Telegram bot...")
     application = ApplicationBuilder().token(BOT_TOKEN).build()
     
+    # Add handlers
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CallbackQueryHandler(button_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     
-    application.run_polling(drop_pending_updates=True)
+    # Start polling
+    await application.run_polling(drop_pending_updates=True)
 
+# --- FLASK SERVER SETUP ---
 def run_flask_app():
+    """Run Flask server in a separate thread"""
     port = int(os.environ.get('PORT', 10000))
-    from waitress import serve
-    print(f"🌐 Starting Flask server on http://0.0.0.0:{port}")
-    serve(flask_app, host="0.0.0.0", port=port)
+    try:
+        from waitress import serve
+        print(f"🌐 Starting Flask server on http://0.0.0.0:{port}")
+        serve(flask_app, host="0.0.0.0", port=port)
+    except ImportError:
+        print("⚠️  Waitress not found, using Flask dev server")
+        flask_app.run(host="0.0.0.0", port=port)
 
-if __name__ == '__main__':
+# --- MAIN EXECUTION ---
+async def main():
+    """Main async function to run both Flask and Telegram bot"""
     print("🚀 Starting Trusty Lads Bot services...")
     
-    bot_thread = Thread(target=run_telegram_bot, daemon=True)
-    bot_thread.start()
+    # Start Flask in a separate thread
+    flask_thread = Thread(target=run_flask_app, daemon=True)
+    flask_thread.start()
     
-    run_flask_app()
+    # Start Telegram bot (main async task)
+    await setup_bot()
+
+if __name__ == '__main__':
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n👋 Bot stopped by user")
+    except Exception as e:
+        print(f"❌ Error: {e}")
