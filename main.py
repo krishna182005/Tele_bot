@@ -1,4 +1,5 @@
 # main.py - Clean Version for python-telegram-bot v20+
+import sys; print("PYTHON VERSION:", sys.version)
 import asyncio
 import os
 import json
