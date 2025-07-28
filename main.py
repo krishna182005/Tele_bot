@@ -4,10 +4,9 @@ import asyncio
 import os
 import logging
 import json
-import re
-from datetime import datetime, timedelta
+from datetime import datetime
 from threading import Thread
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from telegram.error import Conflict, TimedOut, NetworkError
@@ -75,7 +74,7 @@ PRODUCT_CATALOG = {
     }
 }
 
-# OFFERS AND PROMO CODES
+# OFFERS AND PROMO CODES (used only in checkout)
 ACTIVE_OFFERS = {
     "WELCOME20": {"discount": 20, "description": "20% off for new customers", "min_order": 0},
     "BULK50": {"discount": 15, "description": "15% off on orders above $50", "min_order": 50},
@@ -161,7 +160,7 @@ def home():
                     <div class="feature">📦 Product Catalog with 4 Categories</div>
                     <div class="feature">💳 Full Checkout Process</div>
                     <div class="feature">📋 Order History & Tracking</div>
-                    <div class="feature">🎁 Promo Codes & Offers</div>
+                    <div class="feature">🎁 Promo Codes in Checkout</div>
                     <div class="feature">🏪 About Us & Company Info</div>
                     <div class="feature">📞 Customer Support System</div>
                     <div class="feature">💾 Order Management & Storage</div>
@@ -214,7 +213,8 @@ def get_user_session(user_id):
             "message_count": 0,
             "current_context": None,
             "user_info": {},
-            "last_order": None
+            "last_order": None,
+            "checkout_data": {}
         }
     return user_sessions[user_id]
 
@@ -230,14 +230,18 @@ def add_to_cart(user_id, category, product_id):
     if item_key in cart:
         cart[item_key]["quantity"] += 1
     else:
-        product = PRODUCT_CATALOG[category]["products"][product_id]
-        cart[item_key] = {
-            "name": product["name"],
-            "price": product["price"],
-            "quantity": 1,
-            "category": category,
-            "product_id": product_id
-        }
+        try:
+            product = PRODUCT_CATALOG[category]["products"][product_id]
+            cart[item_key] = {
+                "name": product["name"],
+                "price": product["price"],
+                "quantity": 1,
+                "category": category,
+                "product_id": product_id
+            }
+        except KeyError as e:
+            logger.error(f"Error adding to cart: Invalid category {category} or product {product_id}")
+            return None
     return cart[item_key]
 
 def calculate_cart_total(user_id):
@@ -246,7 +250,10 @@ def calculate_cart_total(user_id):
     return round(total, 2)
 
 def clear_user_cart(user_id):
-    user_carts[user_id] = {}
+    if user_id in user_carts:
+        user_carts[user_id] = {}
+        return True
+    return False
 
 def save_order(user_id, order_data):
     global order_counter
@@ -297,7 +304,7 @@ def get_main_menu_keyboard():
     keyboard = [
         [KeyboardButton("🛒 Browse Products"), KeyboardButton("🛍️ View Cart")],
         [KeyboardButton("📦 My Orders"), KeyboardButton("ℹ️ About Us")],
-        [KeyboardButton("📞 Contact Support"), KeyboardButton("💰 Offers")]
+        [KeyboardButton("📞 Contact Support")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
 
@@ -326,8 +333,6 @@ Your premium destination for quality products! 🛍️
 • Secure checkout process
 • Track your orders in real-time
 
-🎁 **Special Offer:** Use code **WELCOME20** for 20% off your first order!
-
 👆 *Use the menu buttons below to start shopping!*
     """
     
@@ -351,7 +356,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 **ℹ️ Information:**
 • About Us - Learn about Trusty Lads
 • Contact Support - Get help from our team
-• Offers - View current promotions
 
 **💡 How to Shop:**
 1. **Browse** - Select "🛒 Browse Products"
@@ -359,11 +363,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 3. **Add to Cart** - Click "Add to Cart" buttons
 4. **Checkout** - Go to "🛍️ View Cart" and checkout
 5. **Track** - Use "📦 My Orders" to track delivery
-
-**🎁 Promo Codes:**
-• WELCOME20 - 20% off first order
-• BULK50 - 15% off orders $50+
-• PREMIUM100 - 25% off orders $100+
 
 Need more help? Use "📞 Contact Support"!
     """
@@ -546,37 +545,21 @@ Need immediate help? Call us now! 📞
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text(support_text, parse_mode='Markdown', reply_markup=reply_markup)
-
-async def view_offers(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    offers_text = "💰 **Current Offers & Promotions**\n\n"
-    
-    for code, offer in ACTIVE_OFFERS.items():
-        offers_text += f"🎁 **{code}**\n"
-        offers_text += f"   {offer['description']}\n"
-        if offer['min_order'] > 0:
-            offers_text += f"   Minimum order: ${offer['min_order']}\n"
-        offers_text += f"   Discount: {offer['discount']}% off\n\n"
-    
-    offers_text += "💡 **How to Use:**\n"
-    offers_text += "1. Add items to your cart\n"
-    offers_text += "2. Proceed to checkout\n"
-    offers_text += "3. Enter the promo code when asked\n"
-    offers_text += "4. Enjoy your discount!\n\n"
-    offers_text += "*Terms and conditions apply. Offers may expire without notice.*"
-    
-    keyboard = [
-        [InlineKeyboardButton("🛒 Start Shopping", callback_data="browse_products")],
-        [InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_menu")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await update.message.reply_text(offers_text, parse_mode='Markdown', reply_markup=reply_markup)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(support_text, parse_mode='Markdown', reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(support_text, parse_mode='Markdown', reply_markup=reply_markup)
 
 # --- CALLBACK QUERY HANDLERS ---
 async def handle_category_selection(update: Update, category_id: str):
     query = update.callback_query
-    category_data = PRODUCT_CATALOG[category_id]
+    await query.answer()
+    
+    try:
+        category_data = PRODUCT_CATALOG[category_id]
+    except KeyError:
+        await query.edit_message_text("❌ Invalid category selected.")
+        return
     
     keyboard = []
     for product_id, product in category_data["products"].items():
@@ -599,7 +582,13 @@ async def handle_category_selection(update: Update, category_id: str):
 
 async def handle_product_selection(update: Update, category_id: str, product_id: str):
     query = update.callback_query
-    product = PRODUCT_CATALOG[category_id]["products"][product_id]
+    await query.answer()
+    
+    try:
+        product = PRODUCT_CATALOG[category_id]["products"][product_id]
+    except KeyError:
+        await query.edit_message_text("❌ Invalid product selected.")
+        return
     
     keyboard = [
         [InlineKeyboardButton("🛒 Add to Cart", callback_data=f"add_cart_{category_id}_{product_id}")],
@@ -622,9 +611,14 @@ async def handle_product_selection(update: Update, category_id: str, product_id:
 
 async def handle_add_to_cart(update: Update, category_id: str, product_id: str):
     query = update.callback_query
+    await query.answer()
     user_id = query.from_user.id
     
     added_item = add_to_cart(user_id, category_id, product_id)
+    if not added_item:
+        await query.edit_message_text("❌ Error adding item to cart. Please try again.")
+        return
+    
     cart_total = calculate_cart_total(user_id)
     cart_count = sum(item["quantity"] for item in get_user_cart(user_id).values())
     
@@ -649,6 +643,7 @@ async def handle_add_to_cart(update: Update, category_id: str, product_id: str):
 # --- CHECKOUT PROCESS ---
 async def start_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    await query.answer()
     user_id = query.from_user.id
     cart = get_user_cart(user_id)
     
@@ -658,6 +653,7 @@ async def start_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     session = get_user_session(user_id)
     session['current_context'] = "checkout_name"
+    session['checkout_data'] = {}  # Reset checkout data
     
     cart_summary = "🛍️ **Order Summary:**\n\n"
     total = 0
@@ -681,12 +677,15 @@ async def start_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def process_checkout_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     session = get_user_session(user_id)
-    message_text = update.message.text
+    message_text = update.message.text.strip()
     
     current_context = session.get('current_context')
     
     if current_context == "checkout_name":
-        session['checkout_data'] = {"full_name": message_text}
+        if not message_text:
+            await update.message.reply_text("❌ Please enter a valid full name:")
+            return
+        session['checkout_data']['full_name'] = message_text
         session['current_context'] = "checkout_phone"
         
         await update.message.reply_text(
@@ -695,6 +694,9 @@ async def process_checkout_step(update: Update, context: ContextTypes.DEFAULT_TY
         )
     
     elif current_context == "checkout_phone":
+        if not message_text:
+            await update.message.reply_text("❌ Please enter a valid phone number:")
+            return
         session['checkout_data']['phone'] = message_text
         session['current_context'] = "checkout_address"
         
@@ -704,6 +706,9 @@ async def process_checkout_step(update: Update, context: ContextTypes.DEFAULT_TY
         )
     
     elif current_context == "checkout_address":
+        if not message_text:
+            await update.message.reply_text("❌ Please enter a valid delivery address:")
+            return
         session['checkout_data']['address'] = message_text
         session['current_context'] = "checkout_payment"
         
@@ -721,26 +726,26 @@ async def process_checkout_step(update: Update, context: ContextTypes.DEFAULT_TY
     
     elif current_context == "checkout_promo":
         promo_code = message_text.upper()
+        cart_total = calculate_cart_total(user_id)
+        
         if promo_code in ACTIVE_OFFERS:
             offer = ACTIVE_OFFERS[promo_code]
-            cart_total = calculate_cart_total(user_id)
-            
             if cart_total >= offer['min_order']:
                 discount_amount = cart_total * (offer['discount'] / 100)
                 final_total = cart_total - discount_amount
-                
                 session['checkout_data']['promo_code'] = promo_code
                 session['checkout_data']['discount'] = discount_amount
                 session['checkout_data']['final_total'] = final_total
-                
                 await finalize_order(update, context)
             else:
                 await update.message.reply_text(
-                    f"❌ Minimum order of ${offer['min_order']:.2f} required for this promo code.\n\n"
+                    f"❌ Minimum order of ${offer['min_order']:.2f} required for promo code {promo_code}.\n\n"
                     "Type 'SKIP' to proceed without promo code or enter a different code:"
                 )
         elif promo_code == "SKIP":
-            session['checkout_data']['final_total'] = calculate_cart_total(user_id)
+            session['checkout_data']['final_total'] = cart_total
+            session['checkout_data']['discount'] = 0
+            session['checkout_data']['promo_code'] = None
             await finalize_order(update, context)
         else:
             await update.message.reply_text(
@@ -749,6 +754,7 @@ async def process_checkout_step(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def handle_payment_selection(update: Update, payment_method: str):
     query = update.callback_query
+    await query.answer()
     user_id = query.from_user.id
     session = get_user_session(user_id)
     
@@ -756,11 +762,7 @@ async def handle_payment_selection(update: Update, payment_method: str):
     session['current_context'] = "checkout_promo"
     
     promo_text = f"✅ Payment Method: {payment_method}\n\n"
-    promo_text += "🎁 **Enter a promo code** for additional discounts or type **SKIP** to continue:\n\n"
-    promo_text += "**Available Codes:**\n"
-    
-    for code, offer in ACTIVE_OFFERS.items():
-        promo_text += f"• **{code}** - {offer['description']}\n"
+    promo_text += "🎁 **Enter a promo code** for additional discounts or type **SKIP** to continue:"
     
     await query.edit_message_text(promo_text, parse_mode='Markdown')
 
@@ -803,6 +805,7 @@ async def finalize_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     clear_user_cart(user_id)
     session['current_context'] = "main_menu"
     session['last_order'] = order_id
+    session['checkout_data'] = {}  # Clear checkout data
     
     # Send confirmation
     confirmation_text = f"✅ **Order Confirmed!**\n\n"
@@ -837,10 +840,7 @@ async def finalize_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    if hasattr(update, 'callback_query') and update.callback_query:
-        await update.callback_query.edit_message_text(confirmation_text, parse_mode='Markdown', reply_markup=reply_markup)
-    else:
-        await update.message.reply_text(confirmation_text, parse_mode='Markdown', reply_markup=reply_markup)
+    await update.message.reply_text(confirmation_text, parse_mode='Markdown', reply_markup=reply_markup)
 
 # --- MAIN CALLBACK QUERY HANDLER ---
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -871,8 +871,16 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await view_cart(update, context)
     
     elif data == "clear_cart":
-        clear_user_cart(user_id)
-        await query.edit_message_text("🗑️ **Cart Cleared!**\n\nYour shopping cart is now empty.")
+        if clear_user_cart(user_id):
+            await query.edit_message_text(
+                "🗑️ **Cart Cleared!**\n\nYour shopping cart is now empty.",
+                parse_mode='Markdown'
+            )
+        else:
+            await query.edit_message_text(
+                "❌ Error clearing cart. Please try again.",
+                parse_mode='Markdown'
+            )
     
     elif data == "start_checkout":
         await start_checkout(update, context)
@@ -881,11 +889,15 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         payment_method = "Cash on Delivery" if data == "payment_cod" else "Online Payment"
         await handle_payment_selection(update, payment_method)
     
+    elif data == "contact_support":
+        await contact_support(update, context)
+    
     elif data == "back_to_menu":
         reply_markup = get_main_menu_keyboard()
         await query.edit_message_text(
             "🏠 **Main Menu**\n\nUse the buttons below to navigate:",
-            parse_mode='Markdown'
+            parse_mode='Markdown',
+            reply_markup=reply_markup
         )
 
 # --- MESSAGE HANDLER FOR MENU BUTTONS ---
@@ -910,8 +922,6 @@ async def handle_menu_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE
         await about_us(update, context)
     elif message_text == "📞 Contact Support":
         await contact_support(update, context)
-    elif message_text == "💰 Offers":
-        await view_offers(update, context)
     else:
         # Default response for unknown messages
         await update.message.reply_text(
