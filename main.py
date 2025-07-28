@@ -24,8 +24,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# Log token availability (avoid logging actual token for security)
-logger.info(f"🔍 BOT_TOKEN found: {'Yes' if BOT_TOKEN else 'No'}")
+print(f"🔍 BOT_TOKEN found: {'Yes' if BOT_TOKEN else 'No'}")
 
 # Global flag for clean shutdown
 bot_running = False
@@ -55,7 +54,6 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    """Render the bot's dashboard with live statistics and features."""
     stats = {
         "active_users": len(user_sessions),
         "total_messages": sum(session.get('message_count', 0) for session in user_sessions.values()),
@@ -130,7 +128,6 @@ def home():
 
 @app.route('/health')
 def health_check():
-    """Return the health status of the bot."""
     return jsonify({
         "status": "healthy" if bot_running else "starting",
         "service": "trusty-lads-enhanced-bot",
@@ -146,28 +143,14 @@ def health_check():
 
 @app.route('/analytics')
 def analytics():
-    """Return analytics data for the bot."""
     return jsonify({
         "active_sessions": len(user_sessions),
         "user_data": {str(k): v for k, v in user_sessions.items()},
         "total_messages": sum(session.get('message_count', 0) for session in user_sessions.values())
     })
 
-@app.route('/clear_webhook', methods=['POST'])
-async def clear_webhook():
-    """Clear the Telegram webhook configuration."""
-    try:
-        application = ApplicationBuilder().token(BOT_TOKEN).build()
-        await application.bot.set_webhook(url='')
-        logger.info("Webhook cleared successfully")
-        return jsonify({"status": "success", "message": "Webhook cleared"})
-    except Exception as e:
-        logger.error(f"Failed to clear webhook: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
 # --- USER SESSION MANAGEMENT ---
 def get_user_session(user_id):
-    """Initialize or retrieve a user session."""
     if user_id not in user_sessions:
         user_sessions[user_id] = {
             "first_interaction": datetime.now(),
@@ -175,13 +158,11 @@ def get_user_session(user_id):
             "current_context": None,
             "support_tickets": [],
             "preferences": {},
-            "last_order": None,
-            "last_rating": None
+            "last_order": None
         }
     return user_sessions[user_id]
 
 def update_user_session(user_id, **kwargs):
-    """Update user session with new data."""
     session = get_user_session(user_id)
     session.update(kwargs)
     session['message_count'] += 1
@@ -189,11 +170,11 @@ def update_user_session(user_id, **kwargs):
 
 # --- ENHANCED BOT HANDLERS ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle the /start command with a welcome message and custom keyboard."""
     user = update.effective_user
     session = get_user_session(user.id)
     logger.info(f"👋 User started bot: {user.first_name} (ID: {user.id})")
     
+    # Create custom keyboard
     keyboard = [
         [KeyboardButton("🛍️ Products"), KeyboardButton("📦 Track Order")],
         [KeyboardButton("🆘 Get Help"), KeyboardButton("💬 Live Chat")],
@@ -229,14 +210,14 @@ Use the buttons below or type your questions naturally!
     update_user_session(user.id, current_context="welcome")
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle the /help command with an interactive help menu."""
+    # Create inline keyboard for better UX
     keyboard = [
         [InlineKeyboardButton("🛍️ Products", callback_data="help_products"),
          InlineKeyboardButton("📦 Orders", callback_data="help_orders")],
         [InlineKeyboardButton("🚚 Shipping", callback_data="help_shipping"),
          InlineKeyboardButton("💰 Refunds", callback_data="help_refunds")],
         [InlineKeyboardButton("🔍 FAQ", callback_data="show_faq"),
-         deerButton("📞 Contact", callback_data="help_contact")]
+         InlineKeyboardButton("📞 Contact", callback_data="help_contact")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -264,7 +245,6 @@ Just type your questions naturally! I understand context and can help with compl
     await update.message.reply_text(help_text, parse_mode='Markdown', reply_markup=reply_markup)
 
 async def enhanced_products_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Display the product catalog with interactive buttons."""
     keyboard = [
         [InlineKeyboardButton("🔥 Premium Package", callback_data="product_premium"),
          InlineKeyboardButton("⚡ Standard Package", callback_data="product_standard")],
@@ -309,7 +289,6 @@ async def enhanced_products_command(update: Update, context: ContextTypes.DEFAUL
     await update.message.reply_text(products_text, parse_mode='Markdown', reply_markup=reply_markup)
 
 async def track_order_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle the /track command for order tracking."""
     user_id = update.effective_user.id
     args = context.args
     
@@ -345,7 +324,6 @@ async def track_order_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         update_user_session(user_id, current_context="tracking")
 
 async def process_order_lookup(update, order_num):
-    """Process an order lookup by order number."""
     if order_num in fake_orders:
         order = fake_orders[order_num]
         status_emoji = {"Shipped": "🚚", "Processing": "⏳", "Delivered": "✅", "Cancelled": "❌"}
@@ -385,7 +363,6 @@ async def process_order_lookup(update, order_num):
         )
 
 async def faq_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle the /faq command to display frequently asked questions."""
     keyboard = []
     for i, question in enumerate(list(faq_data.keys())[:6]):  # Show first 6 FAQs
         keyboard.append([InlineKeyboardButton(f"❓ {question}", callback_data=f"faq_{i}")])
@@ -413,7 +390,6 @@ Click any question below for an instant answer, or search for specific topics!
     await update.message.reply_text(faq_text, parse_mode='Markdown', reply_markup=reply_markup)
 
 async def support_ticket_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle the /support command to create a support ticket."""
     user = update.effective_user
     session = get_user_session(user.id)
     
@@ -453,7 +429,6 @@ Select a category below and I'll connect you with the right specialist:
     update_user_session(user.id, current_context="support_ticket")
 
 async def feedback_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle the /feedback command for user ratings."""
     keyboard = [
         [InlineKeyboardButton("⭐⭐⭐⭐⭐ Excellent", callback_data="rating_5")],
         [InlineKeyboardButton("⭐⭐⭐⭐ Good", callback_data="rating_4")],
@@ -481,7 +456,6 @@ After rating, you'll have the option to leave detailed comments or suggestions.
     await update.message.reply_text(feedback_text, parse_mode='Markdown', reply_markup=reply_markup)
 
 async def promo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle the /promo command to manage promo codes."""
     args = context.args
     
     if args:
@@ -517,7 +491,6 @@ Subscribe to notifications for exclusive promo codes!
         await update.message.reply_text(promo_text, parse_mode='Markdown', reply_markup=reply_markup)
 
 async def validate_promo_code(update, code):
-    """Validate a promo code and provide feedback."""
     valid_codes = {
         "TRUSTY20": {"discount": "20%", "description": "20% off first month"},
         "STUDENT50": {"discount": "50%", "description": "50% off for students"},
@@ -564,139 +537,15 @@ async def validate_promo_code(update, code):
             reply_markup=reply_markup
         )
 
-async def smart_auto_reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle natural language messages with context-aware responses."""
-    user = update.effective_user
-    message_text = update.message.text.lower()
-    user_id = user.id
-    session = get_user_session(user_id)
-    
-    logger.info(f"💬 Smart reply from {user.first_name}: {message_text}")
-    
-    # Handle button presses from custom keyboard
-    if update.message.text in ["🛍️ Products", "📦 Track Order", "🆘 Get Help", "💬 Live Chat", "⭐ Leave Feedback", "🎁 Promo Codes"]:
-        if update.message.text == "🛍️ Products":
-            await enhanced_products_command(update, context)
-        elif update.message.text == "📦 Track Order":
-            await track_order_command(update, context)
-        elif update.message.text == "🆘 Get Help":
-            await help_command(update, context)
-        elif update.message.text == "💬 Live Chat":
-            await support_ticket_command(update, context)
-        elif update.message.text == "⭐ Leave Feedback":
-            await feedback_command(update, context)
-        elif update.message.text == "🎁 Promo Codes":
-            await promo_command(update, context)
-        return
-    
-    # Context-aware responses
-    current_context = session.get('current_context')
-    
-    # Handle specific contexts
-    if current_context == "tracking":
-        await process_order_lookup(update, message_text.upper())
-        return
-    elif current_context == "promo_entry":
-        await validate_promo_code(update, message_text.upper())
-        update_user_session(user_id, current_context="general_chat")
-        return
-    elif current_context == "feedback_comment":
-        session['feedback_comment'] = message_text
-        await update.message.reply_text(
-            f"Thank you for your feedback: '{message_text}'!\n\n🎁 Here's your 10% discount code: **FEEDBACK10**\n\nAnything else I can help with?",
-            parse_mode='Markdown'
-        )
-        update_user_session(user_id, current_context="general_chat")
-        return
-    elif current_context == "faq_search":
-        # Search FAQ for matching questions
-        matches = [q for q in faq_data.keys() if any(word in q.lower() for word in message_text.split())]
-        if matches:
-            response = "🔍 **FAQ Search Results:**\n\n"
-            for q in matches[:3]:  # Limit to 3 results
-                response += f"❓ **{q}**\n{faq_data[q]}\n\n"
-            response += "Was this helpful? Type another question or use /faq for more."
-        else:
-            response = "🔍 No FAQ matches found. Try rephrasing or use /faq to browse all questions."
-        await update.message.reply_text(response, parse_mode='Markdown')
-        update_user_session(user_id, current_context="general_chat")
-        return
-    
-    # Order number detection
-    order_match = re.search(r'tl-\d+', message_text)
-    if order_match:
-        order_num = order_match.group(0).upper()
-        await process_order_lookup(update, order_num)
-        update_user_session(user_id, current_context="order_lookup")
-        return
-    
-    # Smart keyword detection with enhanced responses
-    if any(word in message_text for word in ['hello', 'hi', 'hey', 'good morning', 'good afternoon', 'start']):
-        keyboard = [
-            [InlineKeyboardButton("🛍️ Browse Products", callback_data="view_products")],
-            [InlineKeyboardButton("📦 Track Order", callback_data="track_order")],
-            [InlineKeyboardButton("🆘 Get Help", callback_data="get_help")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        response = f"👋 Hello {user.first_name}! Welcome back to Trusty Lads! 🎉\n\nI'm your enhanced AI assistant with lots of new features. What can I help you with today?"
-        await update.message.reply_text(response, reply_markup=reply_markup)
-    
-    elif any(word in message_text for word in ['order', 'purchase', 'buy', 'price', 'cost', 'product']):
-        await enhanced_products_command(update, context)
-    
-    elif any(word in message_text for word in ['track', 'tracking', 'shipment', 'delivery', 'where is']):
-        await track_order_command(update, context)
-    
-    elif any(word in message_text for word in ['problem', 'issue', 'help', 'support', 'broken', 'not working', 'error']):
-        await support_ticket_command(update, context)
-    
-    elif any(word in message_text for word in ['refund', 'return', 'cancel', 'money back']):
-        keyboard = [
-            [InlineKeyboardButton("📞 Contact Support", callback_data="contact_support")],
-            [InlineKeyboardButton("🔍 View FAQ", callback_data="show_faq")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        response = f"🔄 **Refund/Cancellation Info**\n\n{faq_data['What\'s your refund policy?']}\n\nNeed more help? Contact support or check our FAQ."
-        await update.message.reply_text(response, parse_mode='Markdown', reply_markup=reply_markup)
-    
-    elif any(word in message_text for word in ['ship', 'deliver', 'arrive']):
-        keyboard = [
-            [InlineKeyboardButton("📦 Track Order", callback_data="track_order")],
-            [InlineKeyboardButton("🔍 View FAQ", callback_data="show_faq")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        response = f"🚚 **Shipping Info**\n\n{faq_data['How long does shipping take?']}\n\nWant to track an order or learn more?"
-        await update.message.reply_text(response, parse_mode='Markdown', reply_markup=reply_markup)
-    
-    else:
-        # Fallback to FAQ matching
-        response = None
-        for question, answer in faq_data.items():
-            if any(word in message_text for word in question.lower().split()):
-                response = f"🤖 **FAQ Answer**\n\n**{question}**\n{answer}"
-                break
-        
-        if not response:
-            response = "🤔 I didn't quite understand that. Could you rephrase? Or try /help to see all options!"
-        
-        keyboard = [
-            [InlineKeyboardButton("🆘 Get Help", callback_data="get_help")],
-            [InlineKeyboardButton("🔍 FAQ", callback_data="show_faq")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(response, parse_mode='Markdown', reply_markup=reply_markup)
-    
-    update_user_session(user_id, current_context="general_chat")
-
+# --- CALLBACK QUERY HANDLER ---
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle button callbacks from inline keyboards."""
     query = update.callback_query
     await query.answer()
     
     data = query.data
     user_id = query.from_user.id
     
+    # Handle different callback types
     if data.startswith("faq_"):
         faq_index = int(data.split("_")[1])
         questions = list(faq_data.keys())
@@ -732,6 +581,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=reply_markup
         )
         
+        # Save rating to user session
         session = get_user_session(user_id)
         session['last_rating'] = rating
     
@@ -748,126 +598,426 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown',
             reply_markup=reply_markup
         )
-    
-    elif data == "detailed_feedback":
-        await query.edit_message_text("📝 Please type your detailed feedback:")
-        update_user_session(user_id, current_context="feedback_comment")
-    
-    elif data == "get_feedback_discount":
-        await query.edit_message_text(
-            "🎁 Your 10% discount code is **FEEDBACK10**!\n\nUse it at checkout. Anything else I can help with?",
-            parse_mode='Markdown'
-        )
-        update_user_session(user_id, current_context="general_chat")
-    
-    elif data == "create_ticket":
-        await support_ticket_command(query, context)
-    
-    elif data == "live_chat":
-        await query.edit_message_text(
-            "💬 Live chat is not available yet. Please create a support ticket with /support or call +1 (800) 555-0199.",
-            parse_mode='Markdown'
-        )
-    
-    elif data == "request_callback":
-        await query.edit_message_text(
-            "📞 Please provide your phone number, and we'll call you back within 24 hours.",
-            parse_mode='Markdown'
-        )
-        update_user_session(user_id, current_context="callback_request")
-    
-    elif data == "view_products":
-        await enhanced_products_command(query, context)
-    
-    elif data == "track_order":
-        await track_order_command(query, context)
-    
-    elif data == "get_help":
-        await help_command(query, context)
 
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle errors that occur during bot operation."""
-    logger.error(f"⚠️ Error occurred: {context.error}", exc_info=context.error)
+# --- SMART AUTO-REPLY HANDLER ---
+async def smart_auto_reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    message_text = update.message.text.lower()
+    user_id = user.id
+    session = get_user_session(user_id)
     
-    if update and update.message:
-        await update.message.reply_text(
-            "😖 Oops! Something went wrong. Our team has been notified. Please try again or contact support."
+    logger.info(f"💬 Smart reply from {user.first_name}: {update.message.text}")
+    
+    # Handle button presses from custom keyboard
+    if update.message.text in ["🛍️ Products", "📦 Track Order", "🆘 Get Help", "💬 Live Chat", "⭐ Leave Feedback", "🎁 Promo Codes"]:
+        if update.message.text == "🛍️ Products":
+            await enhanced_products_command(update, context)
+        elif update.message.text == "📦 Track Order":
+            await track_order_command(update, context)
+        elif update.message.text == "🆘 Get Help":
+            await help_command(update, context)
+        elif update.message.text == "💬 Live Chat":
+            await support_ticket_command(update, context)
+        elif update.message.text == "⭐ Leave Feedback":
+            await feedback_command(update, context)
+        elif update.message.text == "🎁 Promo Codes":
+            await promo_command(update, context)
+        return
+    
+    # Context-aware responses
+    current_context = session.get('current_context')
+    
+    # Order number detection
+    order_match = re.search(r'tl-\d+', message_text)
+    if order_match:
+        order_num = order_match.group(0).upper()
+        await process_order_lookup(update, order_num)
+        update_user_session(user_id, current_context="order_lookup")
+        return
+    
+    # Smart keyword detection with enhanced responses
+    if any(word in message_text for word in ['hello', 'hi', 'hey', 'good morning', 'good afternoon', 'start']):
+        keyboard = [
+            [InlineKeyboardButton("🛍️ Browse Products", callback_data="view_products")],
+            [InlineKeyboardButton("📦 Track Order", callback_data="track_order")],
+            [InlineKeyboardButton("🆘 Get Help", callback_data="get_help")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        response = f"👋 Hello {user.first_name}! Welcome back to Trusty Lads! 🎉\n\nI'm your enhanced AI assistant with lots of new features. What can I help you with today?"
+        await update.message.reply_text(response, reply_markup=reply_markup)
+    
+    elif any(word in message_text for word in ['order', 'purchase', 'buy', 'price', 'cost', 'product']):
+        await enhanced_products_command(update, context)
+    
+    elif any(word in message_text for word in ['track', 'tracking', 'shipment', 'delivery', 'where is']):
+        await track_order_command(update, context)
+    
+    elif any(word in message_text for word in ['problem', 'issue', 'help', 'support', 'broken', 'not working', 'error']):
+        await support_ticket_command(update, context)
+    
+    elif any(word in message_text for word in ['refund', 'return', 'cancel', 'money back']):
+        keyboard = [
+            [InlineKeyboardButton("💰 Process Refund", callback_data="process_refund")],
+            [InlineKeyboardButton("📋 Return Policy", callback_data="return_policy")],
+            [InlineKeyboardButton("📞 Speak to Agent", callback_data="refund_agent")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        response = "💰 **Refund & Return Help**\n\nNo worries! We have a 30-day money-back guarantee. I can help you:\n\n• Process your refund instantly\n• Explain our return policy\n• Connect you with a specialist\n\nWhat would you like to do?"
+        await update.message.reply_text(response, parse_mode='Markdown', reply_markup=reply_markup)
+    
+    elif any(word in message_text for word in ['promo', 'discount', 'coupon', 'code', 'deal', 'offer']):
+        await promo_command(update, context)
+    
+    elif any(word in message_text for word in ['feedback', 'review', 'rating', 'complain', 'suggest']):
+        await feedback_command(update, context)
+    
+    elif any(word in message_text for word in ['faq', 'question', 'frequently asked', 'common questions']):
+        await faq_command(update, context)
+    
+    elif any(word in message_text for word in ['thank', 'thanks', 'appreciate', 'awesome', 'great']):
+        keyboard = [
+            [InlineKeyboardButton("⭐ Rate Experience", callback_data="rate_experience")],
+            [InlineKeyboardButton("🎁 Get Rewards", callback_data="loyalty_rewards")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        response = f"😊 You're so welcome, {user.first_name}! That's what we're here for!\n\n🎉 Since you're happy, would you like to:\n• Rate your experience (get 10% off!)\n• Check out our loyalty rewards"
+        await update.message.reply_text(response, reply_markup=reply_markup)
+    
+    elif any(word in message_text for word in ['human', 'agent', 'person', 'speak to', 'talk to']):
+        keyboard = [
+            [InlineKeyboardButton("👨‍💼 Sales Agent", callback_data="connect_sales")],
+            [InlineKeyboardButton("🔧 Technical Support", callback_data="connect_tech")],
+            [InlineKeyboardButton("💰 Billing Support", callback_data="connect_billing")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        response = "👥 **Connect with Human Agent**\n\nI'll connect you with the right specialist:\n\n👨‍💼 **Sales** - Product questions & purchases\n🔧 **Technical** - App/website issues\n💰 **Billing** - Payment & subscription help\n\nWho would you like to speak with?"
+        await update.message.reply_text(response, parse_mode='Markdown', reply_markup=reply_markup)
+    
+    # Email detection for order lookup
+    elif '@' in message_text and '.' in message_text:
+        email_match = re.search(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', message_text)
+        if email_match:
+            email = email_match.group(0)
+            keyboard = [
+                [InlineKeyboardButton("🔍 Search Orders", callback_data=f"search_email_{email}")],
+                [InlineKeyboardButton("📞 Contact Support", callback_data="contact_support")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            response = f"📧 **Email Detected:** {email}\n\nI can search for orders associated with this email address. Would you like me to look up your order history?"
+            await update.message.reply_text(response, reply_markup=reply_markup)
+    
+    # Phone number detection
+    elif re.search(r'(\+\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}', message_text):
+        phone_match = re.search(r'(\+\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}', message_text)
+        phone = phone_match.group(0)
+        
+        keyboard = [
+            [InlineKeyboardButton("📱 Verify Phone", callback_data=f"verify_phone_{phone}")],
+            [InlineKeyboardButton("🔍 Search Orders", callback_data=f"search_phone_{phone}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        response = f"📱 **Phone Number Detected:** {phone}\n\nI can help you:\n• Verify this number for your account\n• Search for orders using this phone\n\nWhat would you like to do?"
+        await update.message.reply_text(response, reply_markup=reply_markup)
+    
+    # Default intelligent response
+    else:
+        keyboard = [
+            [InlineKeyboardButton("🛍️ Products", callback_data="view_products"),
+             InlineKeyboardButton("📦 Track Order", callback_data="track_order")],
+            [InlineKeyboardButton("🆘 Get Help", callback_data="get_help"),
+             InlineKeyboardButton("💬 Live Chat", callback_data="live_chat")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        response = f"""
+✨ **Thanks for your message, {user.first_name}!**
+
+I received: *"{update.message.text}"*
+
+🤖 I'm your enhanced AI assistant with smart features! Here's what I can help with:
+
+🎯 **Instant Help:**
+• Product info & ordering
+• Order tracking & status
+• Refunds & returns
+• Technical support
+• Promo codes & deals
+
+💡 **Smart Features:**
+• Context-aware responses
+• Order lookup by email/phone
+• Interactive menus & buttons
+• Real-time support tickets
+
+👆 *Use the buttons below or just tell me what you need!*
+
+**Message #{session['message_count']}** | Session time: {(datetime.now() - session['first_interaction']).seconds // 60} min
+        """
+        await update.message.reply_text(response, parse_mode='Markdown', reply_markup=reply_markup)
+    
+    update_user_session(user_id, current_context="general_chat")
+
+# --- ADDITIONAL ENHANCED FEATURES ---
+
+async def process_advanced_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle advanced callback queries"""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data
+    user_id = query.from_user.id
+    
+    if data.startswith("product_"):
+        product_type = data.split("_")[1]
+        
+        if product_type == "premium":
+            keyboard = [
+                [InlineKeyboardButton("🛒 Order Now - $99", callback_data="order_premium")],
+                [InlineKeyboardButton("💬 Chat with Sales", callback_data="sales_chat")],
+                [InlineKeyboardButton("📊 View Features", callback_data="premium_features")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                """🔥 **Premium Package - $99/month**
+
+**✨ VIP Features:**
+• <2 minute response time guarantee
+• Dedicated account manager (Sarah M.)
+• 24/7 priority phone support
+• Advanced analytics dashboard
+• Custom integrations available
+• Monthly strategy calls
+• Exclusive member events
+
+**🎁 Limited Time:** First month 50% off!
+
+**💰 Total Value:** $300+/month
+**Your Price:** Just $99/month
+
+**🏆 Perfect for:** Growing businesses, enterprises, power users
+
+Ready to upgrade your experience?""",
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            )
+    
+    elif data.startswith("ticket_"):
+        ticket_type = data.split("_")[1]
+        ticket_id = data.split("_")[2]
+        
+        session = get_user_session(user_id)
+        ticket = {
+            "id": ticket_id,
+            "type": ticket_type,
+            "created": datetime.now(),
+            "status": "Open",
+            "priority": "Normal"
+        }
+        session['support_tickets'].append(ticket)
+        
+        keyboard = [
+            [InlineKeyboardButton("📝 Add Details", callback_data=f"ticket_details_{ticket_id}")],
+            [InlineKeyboardButton("📞 Request Call", callback_data=f"ticket_call_{ticket_id}")],
+            [InlineKeyboardButton("📧 Email Updates", callback_data=f"ticket_email_{ticket_id}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            f"""✅ **Support Ticket Created**
+
+**Ticket ID:** {ticket_id}
+**Type:** {ticket_type.title()}
+**Status:** Open
+**Priority:** Normal
+**Agent:** Will be assigned within 15 minutes
+
+**Next Steps:**
+• Add more details about your issue
+• Request a callback if urgent
+• Get email updates on progress
+
+**Response Time:**
+• Premium: <15 minutes
+• Standard: <2 hours
+• Basic: <24 hours
+
+We'll resolve this quickly!""",
+            parse_mode='Markdown',
+            reply_markup=reply_markup
         )
     
-    error_details = {
-        "timestamp": datetime.now().isoformat(),
-        "error": str(context.error),
-        "update": str(update) if update else None,
-        "user": update.effective_user.id if (update and update.effective_user) else None
-    }
-    logger.error(json.dumps(error_details, indent=2))
+    elif data.startswith("apply_promo_"):
+        promo_code = data.split("_")[2]
+        
+        keyboard = [
+            [InlineKeyboardButton("🛒 Shop Now", callback_data="view_products")],
+            [InlineKeyboardButton("💾 Save Code", callback_data=f"save_promo_{promo_code}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            f"""✅ **Promo Code Ready!**
 
-# --- BOT SETUP & STARTUP ---
-def setup_handlers(application):
-    """Set up all bot handlers for commands, messages, and callbacks."""
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("products", enhanced_products_command))
-    application.add_handler(CommandHandler("track", track_order_command))
-    application.add_handler(CommandHandler("faq", faq_command))
-    application.add_handler(CommandHandler("support", support_ticket_command))
-    application.add_handler(CommandHandler("feedback", feedback_command))
-    application.add_handler(CommandHandler("promo", promo_command))
-    
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, smart_auto_reply_handler))
-    
-    application.add_handler(CallbackQueryHandler(button_callback))
-    
-    application.add_error_handler(error_handler)
+**Code:** {promo_code}
+**Status:** Active and ready to use
 
-async def run_bot(max_retries=3, retry_delay=5):
-    """Run the Telegram bot with retry logic for network errors."""
+🎉 **How to Apply:**
+1. Browse our products
+2. Add items to your cart
+3. Enter code at checkout
+4. Enjoy your discount!
+
+💡 **Tip:** This code is now saved to your account for easy access during checkout.
+
+Ready to start shopping?""",
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
+
+# --- WEBHOOK CLEARING & CONFLICT RESOLUTION ---
+async def clear_existing_webhooks():
+    try:
+        from telegram import Bot
+        bot = Bot(token=BOT_TOKEN)
+        await bot.delete_webhook(drop_pending_updates=True)
+        logger.info("✅ Cleared existing webhooks")
+        return True
+    except Exception as e:
+        logger.warning(f"⚠️ Could not clear webhooks: {e}")
+        return False
+
+# --- ENHANCED BOT SETUP ---
+async def setup_enhanced_bot():
     global bot_running
-    attempt = 0
+    if not BOT_TOKEN:
+        logger.error("❌ CRITICAL: BOT_TOKEN not found!")
+        return None
     
-    while attempt < max_retries:
+    try:
+        await clear_existing_webhooks()
+        await asyncio.sleep(2)
+        
+        application = ApplicationBuilder().token(BOT_TOKEN).build()
+        
+        # Add all command handlers
+        application.add_handler(CommandHandler("start", start_command))
+        application.add_handler(CommandHandler("help", help_command))
+        application.add_handler(CommandHandler("products", enhanced_products_command))
+        application.add_handler(CommandHandler("track", track_order_command))
+        application.add_handler(CommandHandler("faq", faq_command))
+        application.add_handler(CommandHandler("support", support_ticket_command))
+        application.add_handler(CommandHandler("feedback", feedback_command))
+        application.add_handler(CommandHandler("promo", promo_command))
+        
+        # Add callback query handlers
+        application.add_handler(CallbackQueryHandler(button_callback))
+        application.add_handler(CallbackQueryHandler(process_advanced_callback))
+        
+        # Add message handler for smart auto-reply
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, smart_auto_reply_handler))
+        
+        logger.info("✅ Enhanced bot setup complete with all features enabled")
+        return application
+        
+    except Exception as e:
+        logger.error(f"❌ Enhanced bot setup failed: {e}")
+        return None
+
+async def run_enhanced_bot_async():
+    global bot_running
+    application = await setup_enhanced_bot()
+    if not application:
+        return
+    
+    try:
+        retry_count = 0
+        max_retries = 3
+        
+        while retry_count < max_retries:
+            try:
+                bot_info = await application.bot.get_me()
+                logger.info(f"🤖 Enhanced Bot @{bot_info.username} starting... (Attempt {retry_count + 1})")
+                
+                await application.initialize()
+                await application.start()
+                await application.updater.start_polling(
+                    drop_pending_updates=True,
+                    allowed_updates=Update.ALL_TYPES
+                )
+                
+                bot_running = True
+                logger.info("🚀 Enhanced Bot is now running with all features!")
+                logger.info("✨ Features active: Smart replies, Order tracking, Support tickets, FAQ, Feedback, Promos")
+                
+                while bot_running:
+                    await asyncio.sleep(1)
+                break
+                
+            except Conflict as e:
+                retry_count += 1
+                logger.error(f"❌ Conflict error (attempt {retry_count}): {e}")
+                if retry_count < max_retries:
+                    wait_time = retry_count * 10
+                    logger.info(f"⏳ Waiting {wait_time} seconds before retry...")
+                    await asyncio.sleep(wait_time)
+                    await clear_existing_webhooks()
+                    await asyncio.sleep(5)
+                else:
+                    logger.error("❌ Max retries reached. Enhanced bot startup failed.")
+            
+            except (TimedOut, NetworkError) as e:
+                logger.error(f"⚠️ Network error: {e}")
+                await asyncio.sleep(5)
+                continue
+            
+            except Exception as e:
+                logger.error(f"❌ Enhanced bot error: {e}")
+                break
+    
+    finally:
+        bot_running = False
         try:
-            logger.info("🚀 Starting Trusty Lads Enhanced Bot...")
-            
-            application = ApplicationBuilder().token(BOT_TOKEN).build()
-            setup_handlers(application)
-            
-            bot_running = True
-            logger.info("🤖 Bot is now running and polling for updates...")
-            await application.run_polling()
-            break  # Exit loop if polling starts successfully
-            
-        except Conflict as e:
-            logger.error("🔴 Another instance is already running. Shutting down...")
-            break
-        except (TimedOut, NetworkError) as e:
-            attempt += 1
-            logger.error(f"🟡 Network error (attempt {attempt}/{max_retries}): {e}. Retrying in {retry_delay} seconds...")
-            if attempt < max_retries:
-                await asyncio.sleep(retry_delay)
-            else:
-                logger.error("🔴 Max retries reached. Bot failed to start.")
-                raise
-        except Exception as e:
-            logger.error(f"🔴 Critical error: {e}")
-            raise
-        finally:
-            bot_running = False
-            logger.info("🛑 Bot has been stopped")
+            if application:
+                await application.stop()
+                logger.info("🛑 Enhanced bot stopped")
+        except Exception:
+            pass
+
+def run_enhanced_bot_thread():
+    logger.info("🧵 Starting enhanced bot thread...")
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(run_enhanced_bot_async())
+    except KeyboardInterrupt:
+        logger.info("⏹️ Enhanced bot interrupted")
+    except Exception as e:
+        logger.error(f"❌ Enhanced bot thread error: {e}")
+    finally:
+        loop.close()
 
 def run_flask():
-    """Run the Flask server for the dashboard."""
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), use_reloader=False)
+    port = int(os.environ.get('PORT', 5000))
+    logger.info(f"🌐 Starting Flask server on port {port}")
+    try:
+        from waitress import serve
+        serve(app, host='0.0.0.0', port=port)
+    except ImportError:
+        app.run(host='0.0.0.0', port=port, debug=False)
 
 if __name__ == '__main__':
-    if not BOT_TOKEN:
-        logger.error("🔴 BOT_TOKEN is not set. Please set it in the .env file.")
-        exit(1)
+    logger.info("🚀 Starting Enhanced Trusty Lads Customer Service Bot...")
+    logger.info("✨ New Features: Smart replies, Interactive menus, Order tracking, Support tickets, FAQ system, Feedback, Promos")
     
-    # Start Flask in a separate thread
-    flask_thread = Thread(target=run_flask)
-    flask_thread.daemon = True
-    flask_thread.start()
+    bot_thread = Thread(target=run_enhanced_bot_thread, daemon=True)
+    bot_thread.start()
+    logger.info("✅ Enhanced bot thread started")
     
-    # Run the bot in the main thread
-    asyncio.run(run_bot())
+    run_flask()
