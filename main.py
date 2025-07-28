@@ -1,11 +1,14 @@
-# main.py - Complete Telegram Bot with Auto-Reply
+# main.py - Fixed Bot with Conflict Resolution
 import asyncio
 import os
 import logging
+import signal
+import sys
 from threading import Thread
 from flask import Flask
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.error import Conflict, TimedOut, NetworkError
 from dotenv import load_dotenv
 
 # Enable logging
@@ -21,6 +24,9 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 print(f"🔍 BOT_TOKEN found: {'Yes' if BOT_TOKEN else 'No'}")
 
+# Global flag for clean shutdown
+bot_running = False
+
 # --- FLASK APP ---
 app = Flask(__name__)
 
@@ -31,7 +37,7 @@ def home():
         <head><title>Trusty Lads Bot</title></head>
         <body style="font-family: sans-serif; text-align: center; padding: 50px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
             <h1>🤖 Trusty Lads Bot</h1>
-            <p>✅ Status: <strong style="color: #90EE90;">Online & Running</strong></p>
+            <p>✅ Status: <strong style="color: #90EE90;">{'Online & Running' if bot_running else 'Starting...'}</strong></p>
             <p>🔍 Bot Token: {'✅ Found' if BOT_TOKEN else '❌ Missing'}</p>
             <p>📱 Features: Auto-Reply, Commands, Customer Service</p>
             <p>🌐 Environment: {os.environ.get('RENDER', 'Local Development')}</p>
@@ -44,11 +50,23 @@ def home():
 @app.route('/health')
 def health_check():
     return {
-        "status": "healthy", 
+        "status": "healthy" if bot_running else "starting", 
         "service": "trusty-lads-bot",
         "bot_token_present": bool(BOT_TOKEN),
+        "bot_running": bot_running,
         "features": ["auto_reply", "customer_service", "commands"]
     }
+
+# Clear any existing webhooks (common cause of conflicts)
+@app.route('/clear_webhook')
+def clear_webhook():
+    """Clear webhook to prevent conflicts"""
+    try:
+        import requests
+        response = requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook")
+        return {"status": "webhook_cleared", "response": response.json()}
+    except Exception as e:
+        return {"error": str(e)}
 
 # --- BOT HANDLERS ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -260,14 +278,35 @@ I received: "{update.message.text}"
     
     await update.message.reply_text(response, parse_mode='Markdown')
 
-# --- BOT SETUP WITH PROPER THREADING ---
+# --- CONFLICT RESOLUTION ---
+async def clear_existing_webhooks():
+    """Clear any existing webhooks that might cause conflicts"""
+    try:
+        from telegram import Bot
+        bot = Bot(token=BOT_TOKEN)
+        await bot.delete_webhook(drop_pending_updates=True)
+        logger.info("✅ Cleared existing webhooks")
+        return True
+    except Exception as e:
+        logger.warning(f"⚠️ Could not clear webhooks: {e}")
+        return False
+
+# --- BOT SETUP WITH CONFLICT HANDLING ---
 async def setup_bot():
-    """Setup bot with proper async handling"""
+    """Setup bot with proper async handling and conflict resolution"""
+    global bot_running
+    
     if not BOT_TOKEN:
         logger.error("❌ CRITICAL: BOT_TOKEN not found!")
         return None
     
     try:
+        # Clear any existing webhooks first
+        await clear_existing_webhooks()
+        
+        # Wait a moment for cleanup
+        await asyncio.sleep(2)
+        
         # Create application
         application = ApplicationBuilder().token(BOT_TOKEN).build()
         
@@ -291,33 +330,71 @@ async def setup_bot():
         return None
 
 async def run_bot_async():
-    """Run bot in async mode without signal handlers"""
+    """Run bot with proper error handling and retry logic"""
+    global bot_running
+    
     application = await setup_bot()
     if not application:
         return
     
-    try:
-        # Get bot info
-        bot_info = await application.bot.get_me()
-        logger.info(f"🤖 Bot @{bot_info.username} is starting...")
-        
-        # Initialize and start polling with no signal handlers (fixes threading issue)
-        await application.initialize()
-        await application.start()
-        await application.updater.start_polling(drop_pending_updates=True)
-        
-        logger.info("🚀 Bot is now running with auto-reply enabled!")
-        
-        # Keep running
-        while True:
-            await asyncio.sleep(1)
-            
-    except Exception as e:
-        logger.error(f"❌ Bot error: {e}")
-    finally:
+    retry_count = 0
+    max_retries = 3
+    
+    while retry_count < max_retries:
         try:
-            await application.stop()
-            logger.info("🛑 Bot stopped")
+            # Get bot info
+            bot_info = await application.bot.get_me()
+            logger.info(f"🤖 Bot @{bot_info.username} is starting... (Attempt {retry_count + 1})")
+            
+            # Initialize and start with conflict handling
+            await application.initialize()
+            await application.start()
+            
+            # Start polling with retries on conflict
+            await application.updater.start_polling(
+                drop_pending_updates=True,
+                allowed_updates=Update.ALL_TYPES
+            )
+            
+            bot_running = True
+            logger.info("🚀 Bot is now running with auto-reply enabled!")
+            
+            # Keep running
+            while bot_running:
+                await asyncio.sleep(1)
+                
+            break  # Exit retry loop if successful
+            
+        except Conflict as e:
+            retry_count += 1
+            logger.error(f"❌ Conflict error (attempt {retry_count}): {e}")
+            
+            if retry_count < max_retries:
+                wait_time = retry_count * 10
+                logger.info(f"⏳ Waiting {wait_time} seconds before retry...")
+                await asyncio.sleep(wait_time)
+                
+                # Try to clear webhooks again
+                await clear_existing_webhooks()
+                await asyncio.sleep(5)
+            else:
+                logger.error("❌ Max retries reached. Bot startup failed.")
+                
+        except (TimedOut, NetworkError) as e:
+            logger.error(f"⚠️ Network error: {e}")
+            await asyncio.sleep(5)
+            continue
+            
+        except Exception as e:
+            logger.error(f"❌ Bot error: {e}")
+            break
+            
+    finally:
+        bot_running = False
+        try:
+            if application:
+                await application.stop()
+                logger.info("🛑 Bot stopped")
         except:
             pass
 
