@@ -1,635 +1,873 @@
-from flask import Flask
-from threading import Thread
-from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
-from dotenv import load_dotenv
-import os
-import json
-import datetime
-import traceback
+# main.py - Enhanced Trusty Lads Customer Service Bot with Advanced Features
 
-# Load environment variables
+import asyncio
+import os
+import logging
+import json
+import re
+from datetime import datetime, timedelta
+from threading import Thread
+from flask import Flask, jsonify, request
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram.error import Conflict, TimedOut, NetworkError
+from dotenv import load_dotenv
+
+# --- LOGGING ---
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# --- ENVIRONMENT SETUP ---
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-if not BOT_TOKEN:
-    print("❌ ERROR: BOT_TOKEN not found in environment variables!")
-    exit(1)
+# Log token availability (avoid logging actual token for security)
+logger.info(f"🔍 BOT_TOKEN found: {'Yes' if BOT_TOKEN else 'No'}")
 
-# Flask app for keeping service alive on Render
-flask_app = Flask(__name__)
+# Global flag for clean shutdown
+bot_running = False
 
-@flask_app.route('/')
+# In-memory storage for user sessions and data
+user_sessions = {}
+fake_orders = {
+    "TL-12345": {"status": "Shipped", "tracking": "1Z999AA1234567890", "items": "Premium Service Package", "total": "$99.00"},
+    "TL-67890": {"status": "Processing", "tracking": "Pending", "items": "Standard Package", "total": "$49.00"},
+    "TL-11111": {"status": "Delivered", "tracking": "1Z999BB9876543210", "items": "Basic Package", "total": "$19.00"}
+}
+
+# FAQ Database
+faq_data = {
+    "How do I cancel my order?": "You can cancel your order within 24 hours of purchase. Use /cancel with your order number or contact support.",
+    "What's your refund policy?": "We offer a 30-day money-back guarantee. No questions asked!",
+    "Do you offer discounts?": "Yes! Use code TRUSTY20 for 20% off your first month. Students get 50% off with valid ID.",
+    "How long does shipping take?": "Standard shipping: 5-7 days (FREE over $50), Express: 2-3 days ($9.99), Overnight: 1 day ($19.99)",
+    "Can I change my shipping address?": "Yes, if your order hasn't shipped yet. Contact us immediately with your order number.",
+    "Do you ship internationally?": "Yes! We ship to US, Canada, UK, EU, Australia, and New Zealand.",
+    "How do I track my package?": "You'll receive tracking info via SMS and email. Use /track with your tracking number.",
+    "What payment methods do you accept?": "We accept all major credit cards, PayPal, Apple Pay, Google Pay, and cryptocurrency."
+}
+
+# --- FLASK APP ---
+app = Flask(__name__)
+
+@app.route('/')
 def home():
-    return """
+    """Render the bot's dashboard with live statistics and features."""
+    stats = {
+        "active_users": len(user_sessions),
+        "total_messages": sum(session.get('message_count', 0) for session in user_sessions.values()),
+        "bot_uptime": "Online" if bot_running else "Starting..."
+    }
+    
+    return f"""
     <html>
-        <head><title>Trusty Lads Bot</title></head>
-        <body style="font-family: Arial; text-align: center; margin-top: 50px;">
-            <h1>🤖 Trusty Lads Bot is Online!</h1>
-            <p>✅ Bot Status: <strong style="color: green;">Running</strong></p>
-            <p>🕐 Last Check: <span id="time"></span></p>
-            <p>📱 Start chatting with the bot on Telegram!</p>
-            <script>
-                document.getElementById('time').innerHTML = new Date().toLocaleString();
-            </script>
+        <head>
+            <title>Trusty Lads Bot Dashboard</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <style>
+                body {{ font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; 
+                       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                       color: white; min-height: 100vh; }}
+                .container {{ max-width: 800px; margin: 0 auto; }}
+                .card {{ background: rgba(255,255,255,0.1); padding: 20px; margin: 20px 0; 
+                        border-radius: 15px; backdrop-filter: blur(10px); }}
+                .stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }}
+                .stat {{ text-align: center; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 10px; }}
+                .feature {{ margin: 10px 0; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 8px; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>🤖 Trusty Lads Customer Service Bot</h1>
+                
+                <div class="card">
+                    <h2>📊 Live Statistics</h2>
+                    <div class="stats">
+                        <div class="stat">
+                            <h3>{stats['active_users']}</h3>
+                            <p>Active Users</p>
+                        </div>
+                        <div class="stat">
+                            <h3>{stats['total_messages']}</h3>
+                            <p>Messages Handled</p>
+                        </div>
+                        <div class="stat">
+                            <h3>{'✅' if bot_running else '⏳'}</h3>
+                            <p>{stats['bot_uptime']}</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>🚀 Enhanced Features</h2>
+                    <div class="feature">🎯 Smart Auto-Reply with Context Understanding</div>
+                    <div class="feature">🔍 Instant Order Tracking & Status Updates</div>
+                    <div class="feature">💬 Interactive Menus & Quick Buttons</div>
+                    <div class="feature">🤖 AI-Powered FAQ & Help System</div>
+                    <div class="feature">📱 Custom Keyboards for Easy Navigation</div>
+                    <div class="feature">🎫 Support Ticket System</div>
+                    <div class="feature">⭐ Feedback & Rating System</div>
+                    <div class="feature">🔔 Smart Notifications & Reminders</div>
+                    <div class="feature">📊 User Session Management</div>
+                    <div class="feature">🎁 Promo Code Validation</div>
+                </div>
+
+                <div class="card">
+                    <h2>📞 Quick Actions</h2>
+                    <p>Bot Token: {'✅ Found' if BOT_TOKEN else '❌ Missing'}</p>
+                    <p>Environment: {os.environ.get('RENDER', 'Local Development')}</p>
+                    <p><a href="/health" style="color: #90EE90;">Health Check</a> | 
+                       <a href="/clear_webhook" style="color: #90EE90;">Clear Webhook</a> |
+                       <a href="/analytics" style="color: #90EE90;">Analytics</a></p>
+                </div>
+            </div>
         </body>
     </html>
     """
 
-@flask_app.route('/health')
-def health():
-    return {"status": "healthy", "service": "trusty-lads-bot"}
-
-# Product catalog
-PRODUCTS = {
-    "Hair Care": [
-        {"name": "🖤 Hair Comb", "price": 199, "description": "Premium wooden hair comb"},
-        {"name": "💇‍♂️ Hair Gel", "price": 149, "description": "Strong hold styling gel"},
-        {"name": "🧴 Shampoo", "price": 299, "description": "Natural ingredients shampoo"},
-        {"name": "✨ Hair Serum", "price": 399, "description": "Nourishing hair serum"}
-    ],
-    "Beard Care": [
-        {"name": "🧴 Beard Oil", "price": 249, "description": "Premium beard conditioning oil"},
-        {"name": "🪒 Beard Balm", "price": 199, "description": "Styling and conditioning balm"},
-        {"name": "✂️ Beard Trimmer", "price": 899, "description": "Electric precision trimmer"},
-        {"name": "🧼 Beard Wash", "price": 179, "description": "Gentle cleansing beard wash"}
-    ],
-    "Electronics": [
-        {"name": "🎧 Bluetooth Earbuds", "price": 799, "description": "Wireless stereo earbuds"},
-        {"name": "📱 Phone Case", "price": 299, "description": "Protective phone case"},
-        {"name": "⌚ Smart Watch", "price": 1299, "description": "Fitness tracking smartwatch"},
-        {"name": "🔌 Power Bank", "price": 699, "description": "10000mAh portable charger"}
-    ]
-}
-
-user_carts = {}
-user_states = {}
-
-os.makedirs("orders", exist_ok=True)
-
-def get_main_menu_keyboard():
-    return ReplyKeyboardMarkup(
-        [
-            ["🛍️ Browse Products", "🛒 View Cart"],
-            ["📦 My Orders", "ℹ️ About Us"],
-            ["📞 Contact Support", "💰 Special Offers"]
+@app.route('/health')
+def health_check():
+    """Return the health status of the bot."""
+    return jsonify({
+        "status": "healthy" if bot_running else "starting",
+        "service": "trusty-lads-enhanced-bot",
+        "version": "2.0",
+        "features": [
+            "smart_auto_reply", "order_tracking", "interactive_menus", 
+            "faq_system", "support_tickets", "feedback_system",
+            "session_management", "promo_validation"
         ],
-        resize_keyboard=True,
-        one_time_keyboard=False
-    )
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    user_carts[user_id] = []
-    user_states[user_id] = "main_menu"
-    welcome_text = """
-🌟 *Welcome to Trusty Lads!* 🌟
-
-Your one-stop shop for:
-✨ Premium Hair Care Products
-🧔 Professional Beard Care
-📱 Latest Electronics
-
-Use the buttons below to navigate our store!
-    """
-    await update.message.reply_text(
-        welcome_text,
-        parse_mode='Markdown',
-        reply_markup=get_main_menu_keyboard()
-    )
-
-async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = []
-    for category in PRODUCTS.keys():
-        keyboard.append([InlineKeyboardButton(f"📂 {category}", callback_data=f"cat_{category}")])
-    keyboard.append([InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")])
-    await update.message.reply_text(
-        "🛍️ *Browse Our Categories:*",
-        parse_mode='Markdown',
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
-async def show_products_in_category(query, category):
-    keyboard = []
-    text = f"📂 *{category} Products:*\n\n"
-    for i, product in enumerate(PRODUCTS[category]):
-        text += f"{i+1}. {product['name']} - ₹{product['price']}\n   _{product['description']}_\n\n"
-        keyboard.append([InlineKeyboardButton(f"➕ Add {product['name']}", callback_data=f"add_{category}_{i}")])
-    keyboard.append([InlineKeyboardButton("🔙 Back to Categories", callback_data="back_categories")])
-    keyboard.append([InlineKeyboardButton("🛒 View Cart", callback_data="view_cart")])
-    await query.edit_message_text(
-        text,
-        parse_mode='Markdown',
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
-async def view_cart(update_or_query, context: ContextTypes.DEFAULT_TYPE):
-    if hasattr(update_or_query, 'message') and update_or_query.message:
-        user_id = update_or_query.effective_user.id
-    else:
-        user_id = update_or_query.from_user.id
-    cart = user_carts.get(user_id, [])
-    if not cart:
-        if hasattr(update_or_query, 'message') and update_or_query.message:
-            await update_or_query.message.reply_text(
-                "🛒 Your cart is empty! Browse products to add items.",
-                reply_markup=get_main_menu_keyboard())
-        else:
-            await update_or_query.edit_message_text(
-                "🛒 Your cart is empty! Browse products to add items.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🛍️ Browse Products", callback_data="back_categories")],
-                    [InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")]
-                ])
-            )
-        return
-    text = "🛒 *Your Shopping Cart:*\n\n"
-    total = 0
-    for i, item in enumerate(cart):
-        text += f"{i+1}. {item['name']} - ₹{item['price']} × {item['quantity']}\n"
-        total += item['price'] * item['quantity']
-    text += f"\n💰 *Total: ₹{total}*"
-    keyboard = [
-        [InlineKeyboardButton("➖ Remove Item", callback_data="remove_item"),
-         InlineKeyboardButton("➕ Add More", callback_data="add_more")],
-        [InlineKeyboardButton("🗑️ Clear Cart", callback_data="clear_cart"),
-         InlineKeyboardButton("💳 Checkout", callback_data="checkout")],
-        [InlineKeyboardButton("🔙 Continue Shopping", callback_data="back_categories")]
-    ]
-    if hasattr(update_or_query, 'message') and update_or_query.message:
-        await update_or_query.message.reply_text(
-            text,
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(keyboard))
-    else:
-        await update_or_query.edit_message_text(
-            text,
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(keyboard))
-
-async def show_offers(update_or_query, context: ContextTypes.DEFAULT_TYPE):
-    offers_text = """
-🎉 *Current Special Offers!* 🎉
-
-💸 *FLAT20* - 20% off on orders above ₹500
-🎁 *NEWUSER* - 15% off for first-time buyers  
-🛍️ *COMBO50* - Buy 2 get 1 free on hair care
-⚡ *FLASH10* - Extra 10% off on electronics
-
-Use these codes at checkout!
-    """
-    keyboard = [
-        [InlineKeyboardButton("🛍️ Browse Products", callback_data="back_categories")],
-        [InlineKeyboardButton("🛒 View Cart", callback_data="view_cart")],
-        [InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")]
-    ]
-    if hasattr(update_or_query, 'message') and update_or_query.message:
-        await update_or_query.message.reply_text(
-            offers_text,
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(keyboard))
-    else:
-        await update_or_query.edit_message_text(
-            offers_text,
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(keyboard))
-
-async def about_us(update_or_query, context: ContextTypes.DEFAULT_TYPE):
-    about_text = """
-ℹ️ *About Trusty Lads*
-
-🏢 Premium lifestyle brand offering:
-• Quality grooming products
-• Latest electronics
-• Affordable pricing
-
-📍 *Address:* 123 Fashion Street, Style City
-📞 *Phone:* +91-9876543210
-📧 *Email:* support@trustylads.com
-
-⭐ *Why Choose Us?*
-✅ Genuine Products
-✅ Fast Delivery 
-✅ 24/7 Support
-✅ Easy Returns
-    """
-    keyboard = [
-        [InlineKeyboardButton("🛍️ Start Shopping", callback_data="back_categories")],
-        [InlineKeyboardButton("📞 Contact Support", callback_data="contact_support")],
-        [InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")]
-    ]
-    if hasattr(update_or_query, 'message') and update_or_query.message:
-        await update_or_query.message.reply_text(
-            about_text,
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(keyboard))
-    else:
-        await update_or_query.edit_message_text(
-            about_text,
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(keyboard))
-
-async def contact_support(update_or_query, context: ContextTypes.DEFAULT_TYPE):
-    contact_text = """
-📞 *Contact Our Support Team*
-
-🕒 *Hours:* Mon-Sat: 9AM-8PM | Sun: 10AM-6PM
-
-📲 *Phone:* +91-9876543210
-📧 *Email:* support@trustylads.com
-💬 *WhatsApp:* +91-9876543210
-
-📍 *Address:* 
-123 Fashion Street, Style City
-    """
-    keyboard = [
-        [InlineKeyboardButton("🛍️ Browse Products", callback_data="back_categories")],
-        [InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")]
-    ]
-    if hasattr(update_or_query, 'message') and update_or_query.message:
-        await update_or_query.message.reply_text(
-            contact_text,
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(keyboard))
-    else:
-        await update_or_query.edit_message_text(
-            contact_text,
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(keyboard))
-
-async def show_my_orders(update_or_query, context: ContextTypes.DEFAULT_TYPE):
-    if hasattr(update_or_query, 'message') and update_or_query.message:
-        user_id = update_or_query.effective_user.id
-    else:
-        user_id = update_or_query.from_user.id
-    orders_file = f"orders/user_{user_id}_orders.json"
-    if not os.path.exists(orders_file):
-        if hasattr(update_or_query, 'message') and update_or_query.message:
-            await update_or_query.message.reply_text(
-                "📦 You haven't placed any orders yet!",
-                reply_markup=get_main_menu_keyboard())
-        else:
-            await update_or_query.edit_message_text(
-                "📦 You haven't placed any orders yet!",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🛍️ Shop Again", callback_data="back_categories")],
-                    [InlineKeyboardButton("📞 Contact Support", callback_data="contact_support")],
-                    [InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")]
-                ])
-            )
-        return
-    try:
-        with open(orders_file, 'r') as f:
-            orders = json.load(f)
-        if not orders:
-            if hasattr(update_or_query, 'message') and update_or_query.message:
-                await update_or_query.message.reply_text(
-                    "📦 You haven't placed any orders yet!",
-                    reply_markup=get_main_menu_keyboard())
-            else:
-                await update_or_query.edit_message_text(
-                    "📦 You haven't placed any orders yet!",
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("🛍️ Shop Again", callback_data="back_categories")],
-                        [InlineKeyboardButton("📞 Contact Support", callback_data="contact_support")],
-                        [InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")]
-                    ])
-                )
-            return
-        text = "📦 *Your Recent Orders:*\n\n"
-        for order in orders[-3:]:
-            text += f"🆔 *Order ID:* {order['order_id']}\n"
-            text += f"📅 *Date:* {order['date']}\n"
-            text += f"💰 *Total:* ₹{order['total']}\n"
-            text += f"📋 *Status:* {order['status']}\n\n"
-        keyboard = [
-            [InlineKeyboardButton("🛍️ Shop Again", callback_data="back_categories")],
-            [InlineKeyboardButton("📞 Contact Support", callback_data="contact_support")],
-            [InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")]
-        ]
-        if hasattr(update_or_query, 'message') and update_or_query.message:
-            await update_or_query.message.reply_text(
-                text,
-                parse_mode='Markdown',
-                reply_markup=InlineKeyboardMarkup(keyboard))
-        else:
-            await update_or_query.edit_message_text(
-                text,
-                parse_mode='Markdown',
-                reply_markup=InlineKeyboardMarkup(keyboard))
-    except Exception:
-        if hasattr(update_or_query, 'message') and update_or_query.message:
-            await update_or_query.message.reply_text(
-                "❌ Error loading orders. Please contact support.",
-                reply_markup=get_main_menu_keyboard())
-        else:
-            await update_or_query.edit_message_text(
-                "❌ Error loading orders. Please contact support.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📞 Contact Support", callback_data="contact_support")],
-                    [InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")]
-                ])
-            )
-
-async def checkout(query, user_id):
-    cart = user_carts.get(user_id, [])
-    if not cart:
-        await query.edit_message_text(
-            "🛒 Your cart is empty!",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🛍️ Browse Products", callback_data="back_categories")],
-                [InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")]
-            ])
-        )
-        return
-    user_states[user_id] = "awaiting_order_details"
-    text = "💳 *Checkout Process*\n\n"
-    text += "Please send your details in this format:\n\n"
-    text += "Name: Your Full Name\n"
-    text += "Phone: Your Phone Number\n" 
-    text += "Address: Your Complete Address\n"
-    text += "Payment: COD/Online\n\n"
-    text += "*Example:*\n"
-    text += "Name: John Doe\n"
-    text += "Phone: 9876543210\n"
-    text += "Address: 123 Main St, City, PIN\n"
-    text += "Payment: COD"
-    keyboard = [
-        [InlineKeyboardButton("🔙 Back to Cart", callback_data="view_cart")],
-        [InlineKeyboardButton("🏠 Main Menu", callback_data="back_main")]
-    ]
-    await query.edit_message_text(
-        text,
-        parse_mode='Markdown',
-        reply_markup=InlineKeyboardMarkup(keyboard))
-
-async def process_order(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id, order_details):
-    cart = user_carts.get(user_id, [])
-    if not cart:
-        await update.message.reply_text(
-            "🛒 Your cart is empty!",
-            reply_markup=get_main_menu_keyboard())
-        return
-    total = sum(item['price'] * item['quantity'] for item in cart)
-    order_id = f"TL{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
-    user_name = update.effective_user.first_name or "Customer"
-    order_data = {
-        'order_id': order_id,
-        'user_id': user_id,
-        'user_name': user_name,
-        'date': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        'items': cart,
-        'total': total,
-        'customer_details': order_details,
-        'status': 'Confirmed'
-    }
-    orders_file = f"orders/user_{user_id}_orders.json"
-    orders = []
-    if os.path.exists(orders_file):
-        with open(orders_file, 'r') as f:
-            orders = json.load(f)
-    orders.append(order_data)
-    with open(orders_file, 'w') as f:
-        json.dump(orders, f, indent=2)
-    with open("orders/all_orders.txt", "a", encoding='utf-8') as f:
-        f.write(f"\n{'='*50}\n")
-        f.write(f"ORDER ID: {order_id}\n")
-        f.write(f"DATE: {order_data['date']}\n")
-        f.write(f"CUSTOMER: {user_name}\n")
-        f.write(f"USER ID: {user_id}\n")
-        f.write(f"DETAILS:\n{order_details}\n")
-        f.write(f"ITEMS:\n")
-        for item in cart:
-            f.write(f"- {item['name']} ×{item['quantity']} = ₹{item['price'] * item['quantity']}\n")
-        f.write(f"TOTAL: ₹{total}\n")
-        f.write(f"{'='*50}\n")
-    user_carts[user_id] = []
-    user_states[user_id] = "main_menu"
-    confirmation_text = f"""
-✅ *Order Confirmed!* ✅
-
-🆔 *Order ID:* {order_id}
-💰 *Total:* ₹{total}
-📅 *Date:* {order_data['date']}
-
-📦 Your order will be processed within 24 hours.
-📞 We'll contact you for confirmation.
-
-*Thank you for shopping with Trusty Lads!* 🙏
-    """
-    keyboard = [
-        [InlineKeyboardButton("🛍️ Shop More", callback_data="back_categories")],
-        [InlineKeyboardButton("📦 My Orders", callback_data="my_orders")],
-        [InlineKeyboardButton("🏠 Main Menu", callback_data="back_main")]
-    ]
-    await update.message.reply_text(
-        confirmation_text,
-        parse_mode='Markdown',
-        reply_markup=InlineKeyboardMarkup(keyboard))
-
-async def add_to_cart(query, user_id, category, product_index):
-    if user_id not in user_carts:
-        user_carts[user_id] = []
-    product = PRODUCTS[category][product_index]
-    for item in user_carts[user_id]:
-        if item['name'] == product['name']:
-            item['quantity'] += 1
-            await query.edit_message_text(
-                f"✅ Added another {product['name']} to your cart!",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🛒 View Cart", callback_data="view_cart")],
-                    [InlineKeyboardButton("🛍️ Continue Shopping", callback_data=f"cat_{category}")]
-                ])
-            )
-            return
-    user_carts[user_id].append({
-        'name': product['name'],
-        'price': product['price'],
-        'quantity': 1,
-        'category': category
+        "active_users": len(user_sessions),
+        "bot_running": bot_running
     })
-    await query.edit_message_text(
-        f"✅ {product['name']} added to your cart!",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🛒 View Cart", callback_data="view_cart")],
-            [InlineKeyboardButton("🛍️ Continue Shopping", callback_data=f"cat_{category}")]
-        ])
+
+@app.route('/analytics')
+def analytics():
+    """Return analytics data for the bot."""
+    return jsonify({
+        "active_sessions": len(user_sessions),
+        "user_data": {str(k): v for k, v in user_sessions.items()},
+        "total_messages": sum(session.get('message_count', 0) for session in user_sessions.values())
+    })
+
+@app.route('/clear_webhook', methods=['POST'])
+async def clear_webhook():
+    """Clear the Telegram webhook configuration."""
+    try:
+        application = ApplicationBuilder().token(BOT_TOKEN).build()
+        await application.bot.set_webhook(url='')
+        logger.info("Webhook cleared successfully")
+        return jsonify({"status": "success", "message": "Webhook cleared"})
+    except Exception as e:
+        logger.error(f"Failed to clear webhook: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+# --- USER SESSION MANAGEMENT ---
+def get_user_session(user_id):
+    """Initialize or retrieve a user session."""
+    if user_id not in user_sessions:
+        user_sessions[user_id] = {
+            "first_interaction": datetime.now(),
+            "message_count": 0,
+            "current_context": None,
+            "support_tickets": [],
+            "preferences": {},
+            "last_order": None,
+            "last_rating": None
+        }
+    return user_sessions[user_id]
+
+def update_user_session(user_id, **kwargs):
+    """Update user session with new data."""
+    session = get_user_session(user_id)
+    session.update(kwargs)
+    session['message_count'] += 1
+    session['last_interaction'] = datetime.now()
+
+# --- ENHANCED BOT HANDLERS ---
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the /start command with a welcome message and custom keyboard."""
+    user = update.effective_user
+    session = get_user_session(user.id)
+    logger.info(f"👋 User started bot: {user.first_name} (ID: {user.id})")
+    
+    keyboard = [
+        [KeyboardButton("🛍️ Products"), KeyboardButton("📦 Track Order")],
+        [KeyboardButton("🆘 Get Help"), KeyboardButton("💬 Live Chat")],
+        [KeyboardButton("⭐ Leave Feedback"), KeyboardButton("🎁 Promo Codes")]
+    ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
+    
+    welcome_message = f"""
+🎉 **Welcome to Trusty Lads, {user.first_name}!**
+
+I'm your enhanced AI customer service assistant with tons of new features!
+
+🚀 **What's New:**
+• 🎯 Smart context-aware responses
+• 📱 Easy-to-use button menus
+• 🔍 Real-time order tracking
+• 🤖 Instant FAQ answers
+• 🎫 Support ticket system
+• ⭐ Feedback & ratings
+
+💡 **Getting Started:**
+Use the buttons below or type your questions naturally!
+
+👆 *Tap any button to get started, or just chat with me!*
+    """
+    
+    await update.message.reply_text(
+        welcome_message, 
+        parse_mode='Markdown', 
+        reply_markup=reply_markup
     )
+    
+    update_user_session(user.id, current_context="welcome")
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the /help command with an interactive help menu."""
+    keyboard = [
+        [InlineKeyboardButton("🛍️ Products", callback_data="help_products"),
+         InlineKeyboardButton("📦 Orders", callback_data="help_orders")],
+        [InlineKeyboardButton("🚚 Shipping", callback_data="help_shipping"),
+         InlineKeyboardButton("💰 Refunds", callback_data="help_refunds")],
+        [InlineKeyboardButton("🔍 FAQ", callback_data="show_faq"),
+         deerButton("📞 Contact", callback_data="help_contact")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    help_text = """
+🆘 **Enhanced Help Center**
+
+Choose a category below for instant help, or use these commands:
+
+**🤖 Smart Commands:**
+/start - Welcome & main menu
+/help - This help center  
+/products - Product catalog
+/track - Track your order
+/support - Create support ticket
+/faq - Frequently asked questions
+/feedback - Leave a review
+/promo - Check promo codes
+
+**💬 Natural Chat:**
+Just type your questions naturally! I understand context and can help with complex requests.
+
+👆 *Click the buttons below for specific help topics*
+    """
+    
+    await update.message.reply_text(help_text, parse_mode='Markdown', reply_markup=reply_markup)
+
+async def enhanced_products_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Display the product catalog with interactive buttons."""
+    keyboard = [
+        [InlineKeyboardButton("🔥 Premium Package", callback_data="product_premium"),
+         InlineKeyboardButton("⚡ Standard Package", callback_data="product_standard")],
+        [InlineKeyboardButton("💫 Basic Package", callback_data="product_basic"),
+         InlineKeyboardButton("🎁 View All Deals", callback_data="product_deals")],
+        [InlineKeyboardButton("🛒 Quick Order", callback_data="quick_order"),
+         InlineKeyboardButton("💬 Chat with Sales", callback_data="sales_chat")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    products_text = """
+🛍️ **Trusty Lads Product Catalog** *(Enhanced Edition)*
+
+**🔥 Premium Package - $99/month**
+• 24/7 VIP support with <2min response
+• Dedicated account manager
+• Priority processing & shipping
+• Exclusive member benefits
+• Advanced analytics dashboard
+
+**⚡ Standard Package - $49/month**
+• Business hours support
+• Live chat & email support  
+• Standard processing
+• Monthly reports
+• Community access
+
+**💫 Basic Package - $19/month**
+• Email support (24-48hr response)
+• FAQ & knowledge base
+• Community forum
+• Basic features
+
+**🎁 Current Promotions:**
+• TRUSTY20 - 20% off first month
+• STUDENT50 - 50% off for students
+• BUNDLE25 - 25% off annual plans
+
+👆 *Click buttons below to learn more or order instantly!*
+    """
+    
+    await update.message.reply_text(products_text, parse_mode='Markdown', reply_markup=reply_markup)
+
+async def track_order_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the /track command for order tracking."""
+    user_id = update.effective_user.id
+    args = context.args
+    
+    if args:
+        order_num = args[0].upper()
+        await process_order_lookup(update, order_num)
+    else:
+        keyboard = [
+            [InlineKeyboardButton("🔍 Enter Order Number", callback_data="enter_order_number")],
+            [InlineKeyboardButton("📧 Search by Email", callback_data="search_by_email")],
+            [InlineKeyboardButton("📱 Use Phone Number", callback_data="search_by_phone")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        track_text = """
+📦 **Enhanced Order Tracking**
+
+**How would you like to find your order?**
+
+🔍 **Option 1:** Enter order number (TL-XXXXX)
+📧 **Option 2:** Search by email address
+📱 **Option 3:** Use phone number
+
+**Sample Order Numbers to Try:**
+• TL-12345 (Shipped)
+• TL-67890 (Processing)  
+• TL-11111 (Delivered)
+
+💡 *Tip: Your order number was sent to your email when you purchased*
+        """
+        
+        await update.message.reply_text(track_text, parse_mode='Markdown', reply_markup=reply_markup)
+        update_user_session(user_id, current_context="tracking")
+
+async def process_order_lookup(update, order_num):
+    """Process an order lookup by order number."""
+    if order_num in fake_orders:
+        order = fake_orders[order_num]
+        status_emoji = {"Shipped": "🚚", "Processing": "⏳", "Delivered": "✅", "Cancelled": "❌"}
+        
+        keyboard = [
+            [InlineKeyboardButton("📍 Track Package", callback_data=f"track_package_{order_num}")],
+            [InlineKeyboardButton("📞 Contact Support", callback_data="contact_support"),
+             InlineKeyboardButton("🔄 Check Again", callback_data="recheck_order")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        order_text = f"""
+📦 **Order Status Found!**
+
+**Order:** {order_num}
+**Status:** {status_emoji.get(order['status'], '📦')} {order['status']}
+**Items:** {order['items']}
+**Total:** {order['total']}
+**Tracking:** {order['tracking']}
+
+{'🎉 Your order has been delivered! Hope you love it!' if order['status'] == 'Delivered' else ''}
+{'🚚 Your order is on the way! Estimated delivery: 2-3 business days' if order['status'] == 'Shipped' else ''}
+{'⏳ Your order is being prepared. You\'ll get tracking info soon!' if order['status'] == 'Processing' else ''}
+        """
+        
+        await update.message.reply_text(order_text, parse_mode='Markdown', reply_markup=reply_markup)
+    else:
+        keyboard = [
+            [InlineKeyboardButton("🔍 Try Again", callback_data="enter_order_number")],
+            [InlineKeyboardButton("📞 Contact Support", callback_data="contact_support")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+            f"❌ Order {order_num} not found. Please check the number or contact support.",
+            reply_markup=reply_markup
+        )
+
+async def faq_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the /faq command to display frequently asked questions."""
+    keyboard = []
+    for i, question in enumerate(list(faq_data.keys())[:6]):  # Show first 6 FAQs
+        keyboard.append([InlineKeyboardButton(f"❓ {question}", callback_data=f"faq_{i}")])
+    
+    keyboard.append([InlineKeyboardButton("🔍 Search FAQ", callback_data="search_faq")])
+    keyboard.append([InlineKeyboardButton("❓ Ask Custom Question", callback_data="ask_question")])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    faq_text = """
+🤖 **Frequently Asked Questions**
+
+Click any question below for an instant answer, or search for specific topics!
+
+💡 **Popular Topics:**
+• Order cancellations & refunds
+• Shipping times & costs
+• Discount codes & promotions
+• International shipping
+• Payment methods
+
+👆 *Click a question below or search for something specific*
+    """
+    
+    await update.message.reply_text(faq_text, parse_mode='Markdown', reply_markup=reply_markup)
+
+async def support_ticket_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the /support command to create a support ticket."""
+    user = update.effective_user
+    session = get_user_session(user.id)
+    
+    ticket_id = f"TKT-{len(session['support_tickets']) + 1:04d}"
+    
+    keyboard = [
+        [InlineKeyboardButton("🔧 Technical Issue", callback_data=f"ticket_tech_{ticket_id}")],
+        [InlineKeyboardButton("💰 Billing Question", callback_data=f"ticket_billing_{ticket_id}")],
+        [InlineKeyboardButton("📦 Order Problem", callback_data=f"ticket_order_{ticket_id}")],
+        [InlineKeyboardButton("💬 General Support", callback_data=f"ticket_general_{ticket_id}")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    support_text = f"""
+🎫 **Create Support Ticket** 
+
+**Ticket ID:** {ticket_id}
+**Priority:** Normal
+**Status:** New
+
+**What type of issue are you experiencing?**
+
+Select a category below and I'll connect you with the right specialist:
+
+🔧 **Technical** - App/website issues
+💰 **Billing** - Payment & subscription questions  
+📦 **Orders** - Shipping, delivery, returns
+💬 **General** - Other questions & feedback
+
+⚡ **Response Times:**
+• Premium customers: <15 minutes
+• Standard customers: <2 hours  
+• Basic customers: <24 hours
+    """
+    
+    await update.message.reply_text(support_text, parse_mode='Markdown', reply_markup=reply_markup)
+    update_user_session(user.id, current_context="support_ticket")
+
+async def feedback_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the /feedback command for user ratings."""
+    keyboard = [
+        [InlineKeyboardButton("⭐⭐⭐⭐⭐ Excellent", callback_data="rating_5")],
+        [InlineKeyboardButton("⭐⭐⭐⭐ Good", callback_data="rating_4")],
+        [InlineKeyboardButton("⭐⭐⭐ Average", callback_data="rating_3")],
+        [InlineKeyboardButton("⭐⭐ Poor", callback_data="rating_2")],
+        [InlineKeyboardButton("⭐ Very Poor", callback_data="rating_1")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    feedback_text = """
+⭐ **We Value Your Feedback!**
+
+How was your experience with Trusty Lads today?
+
+Your feedback helps us improve our service and better serve you in the future.
+
+**Rate your experience:**
+👆 *Click the stars below*
+
+After rating, you'll have the option to leave detailed comments or suggestions.
+
+🎁 **Bonus:** Leave feedback and get a 10% discount code for your next purchase!
+    """
+    
+    await update.message.reply_text(feedback_text, parse_mode='Markdown', reply_markup=reply_markup)
+
+async def promo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the /promo command to manage promo codes."""
+    args = context.args
+    
+    if args:
+        promo_code = args[0].upper()
+        await validate_promo_code(update, promo_code)
+    else:
+        keyboard = [
+            [InlineKeyboardButton("🎁 Enter Promo Code", callback_data="enter_promo")],
+            [InlineKeyboardButton("📋 View Available Codes", callback_data="show_promos")],
+            [InlineKeyboardButton("🔔 Get Notified of New Deals", callback_data="promo_notify")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        promo_text = """
+🎁 **Promo Codes & Deals**
+
+**Current Active Codes:**
+• **TRUSTY20** - 20% off first month
+• **STUDENT50** - 50% off for students (ID required)
+• **BUNDLE25** - 25% off annual plans
+• **WELCOME10** - 10% off for new customers
+• **FEEDBACK10** - 10% off after leaving feedback
+
+**💡 How to Use:**
+1. Click "Enter Promo Code" below
+2. Type your code exactly as shown
+3. Apply it during checkout
+
+**🔔 Want More Deals?**
+Subscribe to notifications for exclusive promo codes!
+        """
+        
+        await update.message.reply_text(promo_text, parse_mode='Markdown', reply_markup=reply_markup)
+
+async def validate_promo_code(update, code):
+    """Validate a promo code and provide feedback."""
+    valid_codes = {
+        "TRUSTY20": {"discount": "20%", "description": "20% off first month"},
+        "STUDENT50": {"discount": "50%", "description": "50% off for students"},
+        "BUNDLE25": {"discount": "25%", "description": "25% off annual plans"},
+        "WELCOME10": {"discount": "10%", "description": "10% off for new customers"},
+        "FEEDBACK10": {"discount": "10%", "description": "10% off after feedback"}
+    }
+    
+    if code in valid_codes:
+        promo = valid_codes[code]
+        keyboard = [
+            [InlineKeyboardButton("🛒 Apply to Order", callback_data=f"apply_promo_{code}")],
+            [InlineKeyboardButton("📋 View Products", callback_data="view_products")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        success_text = f"""
+✅ **Promo Code Valid!**
+
+**Code:** {code}
+**Discount:** {promo['discount']}
+**Description:** {promo['description']}
+
+🎉 Great choice! This code is ready to use on your next purchase.
+
+💡 **Next Steps:**
+1. Browse our products
+2. Add items to cart
+3. Enter this code at checkout
+4. Enjoy your savings!
+        """
+        
+        await update.message.reply_text(success_text, parse_mode='Markdown', reply_markup=reply_markup)
+    else:
+        keyboard = [
+            [InlineKeyboardButton("🔍 Try Another Code", callback_data="enter_promo")],
+            [InlineKeyboardButton("📋 View Valid Codes", callback_data="show_promos")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+            f"❌ **Invalid Promo Code**\n\nCode '{code}' is not valid or has expired.\n\n💡 Check the spelling or view available codes below.",
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
+
+async def smart_auto_reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle natural language messages with context-aware responses."""
+    user = update.effective_user
+    message_text = update.message.text.lower()
+    user_id = user.id
+    session = get_user_session(user_id)
+    
+    logger.info(f"💬 Smart reply from {user.first_name}: {message_text}")
+    
+    # Handle button presses from custom keyboard
+    if update.message.text in ["🛍️ Products", "📦 Track Order", "🆘 Get Help", "💬 Live Chat", "⭐ Leave Feedback", "🎁 Promo Codes"]:
+        if update.message.text == "🛍️ Products":
+            await enhanced_products_command(update, context)
+        elif update.message.text == "📦 Track Order":
+            await track_order_command(update, context)
+        elif update.message.text == "🆘 Get Help":
+            await help_command(update, context)
+        elif update.message.text == "💬 Live Chat":
+            await support_ticket_command(update, context)
+        elif update.message.text == "⭐ Leave Feedback":
+            await feedback_command(update, context)
+        elif update.message.text == "🎁 Promo Codes":
+            await promo_command(update, context)
+        return
+    
+    # Context-aware responses
+    current_context = session.get('current_context')
+    
+    # Handle specific contexts
+    if current_context == "tracking":
+        await process_order_lookup(update, message_text.upper())
+        return
+    elif current_context == "promo_entry":
+        await validate_promo_code(update, message_text.upper())
+        update_user_session(user_id, current_context="general_chat")
+        return
+    elif current_context == "feedback_comment":
+        session['feedback_comment'] = message_text
+        await update.message.reply_text(
+            f"Thank you for your feedback: '{message_text}'!\n\n🎁 Here's your 10% discount code: **FEEDBACK10**\n\nAnything else I can help with?",
+            parse_mode='Markdown'
+        )
+        update_user_session(user_id, current_context="general_chat")
+        return
+    elif current_context == "faq_search":
+        # Search FAQ for matching questions
+        matches = [q for q in faq_data.keys() if any(word in q.lower() for word in message_text.split())]
+        if matches:
+            response = "🔍 **FAQ Search Results:**\n\n"
+            for q in matches[:3]:  # Limit to 3 results
+                response += f"❓ **{q}**\n{faq_data[q]}\n\n"
+            response += "Was this helpful? Type another question or use /faq for more."
+        else:
+            response = "🔍 No FAQ matches found. Try rephrasing or use /faq to browse all questions."
+        await update.message.reply_text(response, parse_mode='Markdown')
+        update_user_session(user_id, current_context="general_chat")
+        return
+    
+    # Order number detection
+    order_match = re.search(r'tl-\d+', message_text)
+    if order_match:
+        order_num = order_match.group(0).upper()
+        await process_order_lookup(update, order_num)
+        update_user_session(user_id, current_context="order_lookup")
+        return
+    
+    # Smart keyword detection with enhanced responses
+    if any(word in message_text for word in ['hello', 'hi', 'hey', 'good morning', 'good afternoon', 'start']):
+        keyboard = [
+            [InlineKeyboardButton("🛍️ Browse Products", callback_data="view_products")],
+            [InlineKeyboardButton("📦 Track Order", callback_data="track_order")],
+            [InlineKeyboardButton("🆘 Get Help", callback_data="get_help")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        response = f"👋 Hello {user.first_name}! Welcome back to Trusty Lads! 🎉\n\nI'm your enhanced AI assistant with lots of new features. What can I help you with today?"
+        await update.message.reply_text(response, reply_markup=reply_markup)
+    
+    elif any(word in message_text for word in ['order', 'purchase', 'buy', 'price', 'cost', 'product']):
+        await enhanced_products_command(update, context)
+    
+    elif any(word in message_text for word in ['track', 'tracking', 'shipment', 'delivery', 'where is']):
+        await track_order_command(update, context)
+    
+    elif any(word in message_text for word in ['problem', 'issue', 'help', 'support', 'broken', 'not working', 'error']):
+        await support_ticket_command(update, context)
+    
+    elif any(word in message_text for word in ['refund', 'return', 'cancel', 'money back']):
+        keyboard = [
+            [InlineKeyboardButton("📞 Contact Support", callback_data="contact_support")],
+            [InlineKeyboardButton("🔍 View FAQ", callback_data="show_faq")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        response = f"🔄 **Refund/Cancellation Info**\n\n{faq_data['What\'s your refund policy?']}\n\nNeed more help? Contact support or check our FAQ."
+        await update.message.reply_text(response, parse_mode='Markdown', reply_markup=reply_markup)
+    
+    elif any(word in message_text for word in ['ship', 'deliver', 'arrive']):
+        keyboard = [
+            [InlineKeyboardButton("📦 Track Order", callback_data="track_order")],
+            [InlineKeyboardButton("🔍 View FAQ", callback_data="show_faq")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        response = f"🚚 **Shipping Info**\n\n{faq_data['How long does shipping take?']}\n\nWant to track an order or learn more?"
+        await update.message.reply_text(response, parse_mode='Markdown', reply_markup=reply_markup)
+    
+    else:
+        # Fallback to FAQ matching
+        response = None
+        for question, answer in faq_data.items():
+            if any(word in message_text for word in question.lower().split()):
+                response = f"🤖 **FAQ Answer**\n\n**{question}**\n{answer}"
+                break
+        
+        if not response:
+            response = "🤔 I didn't quite understand that. Could you rephrase? Or try /help to see all options!"
+        
+        keyboard = [
+            [InlineKeyboardButton("🆘 Get Help", callback_data="get_help")],
+            [InlineKeyboardButton("🔍 FAQ", callback_data="show_faq")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(response, parse_mode='Markdown', reply_markup=reply_markup)
+    
+    update_user_session(user_id, current_context="general_chat")
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle button callbacks from inline keyboards."""
     query = update.callback_query
-    user_id = update.effective_user.id
-    data = query.data
     await query.answer()
     
-    try:
-        if data == "back_main":
-            await query.edit_message_text(
-                "🏠 *Main Menu* - What would you like to do?\n\nPlease use the buttons below to navigate:",
-                parse_mode='Markdown',
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🛍️ Browse Products", callback_data="back_categories")],
-                    [InlineKeyboardButton("🛒 View Cart", callback_data="view_cart")],
-                    [InlineKeyboardButton("📦 My Orders", callback_data="my_orders")],
-                    [InlineKeyboardButton("ℹ️ About Us", callback_data="about_us")],
-                    [InlineKeyboardButton("📞 Contact Support", callback_data="contact_support")],
-                    [InlineKeyboardButton("💰 Special Offers", callback_data="special_offers")]
-                ])
-            )
-        elif data == "back_categories":
-            keyboard = []
-            for category in PRODUCTS.keys():
-                keyboard.append([InlineKeyboardButton(f"📂 {category}", callback_data=f"cat_{category}")])
-            keyboard.append([InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")])
-            await query.edit_message_text(
-                "🛍️ *Browse Our Categories:*",
-                parse_mode='Markdown',
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-        elif data.startswith("cat_"):
-            category = data.replace("cat_", "")
-            await show_products_in_category(query, category)
-        elif data.startswith("add_"):
-            parts = data.split("_")
-            if len(parts) >= 3:
-                category = parts[1]
-                try:
-                    product_index = int(parts[2])
-                    await add_to_cart(query, user_id, category, product_index)
-                except (ValueError, IndexError):
-                    await query.edit_message_text("❌ Invalid product selection!")
-        elif data == "view_cart":
-            await view_cart(query, context)
-        elif data == "clear_cart":
-            user_carts[user_id] = []
-            await query.edit_message_text(
-                "🗑️ Your cart has been cleared.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🛍️ Browse Products", callback_data="back_categories")],
-                    [InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")]
-                ])
-            )
-        elif data == "checkout":
-            await checkout(query, user_id)
-        elif data == "contact_support":
-            await contact_support(query, context)
-        elif data == "my_orders":
-            await show_my_orders(query, context)
-        elif data == "special_offers":
-            await show_offers(query, context)
-        elif data == "about_us":
-            await about_us(query, context)
-        else:
-            await query.edit_message_text(
-                "❌ Unknown command. Please use the menu buttons.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")]
-                ])
-            )
-    except Exception as e:
-        print(f"Error in button_callback: {e}")
-        traceback.print_exc()
-        try:
-            await query.edit_message_text(
-                "❌ Something went wrong. Please try again.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")]
-                ])
-            )
-        except:
-            pass
-
-async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        text = update.message.text
-        user_id = update.effective_user.id
-        user_state = user_states.get(user_id, "main_menu")
-
-        if "🛍️ Browse Products" in text:
-            await show_categories(update, context)
-        elif "🛒 View Cart" in text:
-            await view_cart(update, context)
-        elif "📦 My Orders" in text:
-            await show_my_orders(update, context)
-        elif "ℹ️ About Us" in text:
-            await about_us(update, context)
-        elif "📞 Contact Support" in text:
-            await contact_support(update, context)
-        elif "💰 Special Offers" in text:
-            await show_offers(update, context)
-        elif user_state == "awaiting_order_details":
-            await process_order(update, context, user_id, text)
-        else:
-            await update.message.reply_text(
-                "🤔 I didn't understand that. Please use the menu buttons below:",
-                reply_markup=get_main_menu_keyboard())
-    except Exception as e:
-        print(f"Error in message_handler: {e}")
-        traceback.print_exc()
-        try:
-            await update.message.reply_text(
-                "❌ Something went wrong. Please try again or use /start to restart.",
-                reply_markup=get_main_menu_keyboard())
-        except:
-            pass
-
-# Error handler
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    """Log the error and send a telegram message to notify the developer."""
-    print(f"Exception while handling an update: {context.error}")
-    traceback.print_exc()
-
-# Telegram bot function
-def run_telegram_bot():
-    """Run the Telegram bot"""
-    try:
-        print("🤖 Starting Telegram bot...")
-        
-        # Create application
-        application = ApplicationBuilder().token(BOT_TOKEN).build()
-        
-        # Add handlers
-        application.add_handler(CommandHandler("start", start))
-        application.add_handler(CallbackQueryHandler(button_callback))
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
-        
-        # Add error handler
-        application.add_error_handler(error_handler)
-        
-        print("✅ Telegram bot handlers registered")
-        print("🚀 Bot is now running...")
-        
-        # Start polling
-        application.run_polling(drop_pending_updates=True)
-        
-    except Exception as e:
-        print(f"❌ Error starting Telegram bot: {e}")
-        traceback.print_exc()
-
-# Flask function
-def run_flask():
-    """Run Flask web server"""
-    try:
-        port = int(os.environ.get('PORT', 10000))
-        print(f"🌐 Starting Flask server on port {port}...")
-        flask_app.run(host="0.0.0.0", port=port, debug=False)
-    except Exception as e:
-        print(f"❌ Error starting Flask server: {e}")
-        traceback.print_exc()
-
-# Main execution
-if __name__ == '__main__':
-    print("🔐 Bot token loaded successfully!")
-    print("🚀 Starting Trusty Lads Bot services...")
+    data = query.data
+    user_id = query.from_user.id
     
-    try:
-        # Start Telegram bot in a separate thread
-        bot_thread = Thread(target=run_telegram_bot, daemon=True)
-        bot_thread.start()
-        print("✅ Telegram bot thread started")
+    if data.startswith("faq_"):
+        faq_index = int(data.split("_")[1])
+        questions = list(faq_data.keys())
+        if faq_index < len(questions):
+            question = questions[faq_index]
+            answer = faq_data[question]
+            
+            keyboard = [
+                [InlineKeyboardButton("❓ Another Question", callback_data="show_faq")],
+                [InlineKeyboardButton("💬 Still Need Help?", callback_data="contact_support")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                f"**Q: {question}**\n\n**A:** {answer}\n\n💡 *Need more help? Use the buttons below*",
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            )
+    
+    elif data.startswith("rating_"):
+        rating = int(data.split("_")[1])
+        stars = "⭐" * rating
         
-        # Start Flask server (this will block and keep the app alive)
-        run_flask()
-    except Exception as e:
-        print(f"❌ Error in main execution: {e}")
-        traceback.print_exc()
+        keyboard = [
+            [InlineKeyboardButton("📝 Leave Detailed Feedback", callback_data="detailed_feedback")],
+            [InlineKeyboardButton("🎁 Get Discount Code", callback_data="get_feedback_discount")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            f"Thank you for the {stars} rating!\n\n🎁 As a thank you, here's a 10% discount code: **FEEDBACK10**\n\nWould you like to leave more detailed feedback?",
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
+        
+        session = get_user_session(user_id)
+        session['last_rating'] = rating
+    
+    elif data == "contact_support":
+        keyboard = [
+            [InlineKeyboardButton("🎫 Create Ticket", callback_data="create_ticket")],
+            [InlineKeyboardButton("💬 Live Chat", callback_data="live_chat")],
+            [InlineKeyboardButton("📞 Request Callback", callback_data="request_callback")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "📞 **Contact Support Options:**\n\n🎫 Create a support ticket\n💬 Start live chat\n📞 Request a callback\n\nWhat works best for you?",
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
+    
+    elif data == "detailed_feedback":
+        await query.edit_message_text("📝 Please type your detailed feedback:")
+        update_user_session(user_id, current_context="feedback_comment")
+    
+    elif data == "get_feedback_discount":
+        await query.edit_message_text(
+            "🎁 Your 10% discount code is **FEEDBACK10**!\n\nUse it at checkout. Anything else I can help with?",
+            parse_mode='Markdown'
+        )
+        update_user_session(user_id, current_context="general_chat")
+    
+    elif data == "create_ticket":
+        await support_ticket_command(query, context)
+    
+    elif data == "live_chat":
+        await query.edit_message_text(
+            "💬 Live chat is not available yet. Please create a support ticket with /support or call +1 (800) 555-0199.",
+            parse_mode='Markdown'
+        )
+    
+    elif data == "request_callback":
+        await query.edit_message_text(
+            "📞 Please provide your phone number, and we'll call you back within 24 hours.",
+            parse_mode='Markdown'
+        )
+        update_user_session(user_id, current_context="callback_request")
+    
+    elif data == "view_products":
+        await enhanced_products_command(query, context)
+    
+    elif data == "track_order":
+        await track_order_command(query, context)
+    
+    elif data == "get_help":
+        await help_command(query, context)
+
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle errors that occur during bot operation."""
+    logger.error(f"⚠️ Error occurred: {context.error}", exc_info=context.error)
+    
+    if update and update.message:
+        await update.message.reply_text(
+            "😖 Oops! Something went wrong. Our team has been notified. Please try again or contact support."
+        )
+    
+    error_details = {
+        "timestamp": datetime.now().isoformat(),
+        "error": str(context.error),
+        "update": str(update) if update else None,
+        "user": update.effective_user.id if (update and update.effective_user) else None
+    }
+    logger.error(json.dumps(error_details, indent=2))
+
+# --- BOT SETUP & STARTUP ---
+def setup_handlers(application):
+    """Set up all bot handlers for commands, messages, and callbacks."""
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("products", enhanced_products_command))
+    application.add_handler(CommandHandler("track", track_order_command))
+    application.add_handler(CommandHandler("faq", faq_command))
+    application.add_handler(CommandHandler("support", support_ticket_command))
+    application.add_handler(CommandHandler("feedback", feedback_command))
+    application.add_handler(CommandHandler("promo", promo_command))
+    
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, smart_auto_reply_handler))
+    
+    application.add_handler(CallbackQueryHandler(button_callback))
+    
+    application.add_error_handler(error_handler)
+
+async def run_bot(max_retries=3, retry_delay=5):
+    """Run the Telegram bot with retry logic for network errors."""
+    global bot_running
+    attempt = 0
+    
+    while attempt < max_retries:
+        try:
+            logger.info("🚀 Starting Trusty Lads Enhanced Bot...")
+            
+            application = ApplicationBuilder().token(BOT_TOKEN).build()
+            setup_handlers(application)
+            
+            bot_running = True
+            logger.info("🤖 Bot is now running and polling for updates...")
+            await application.run_polling()
+            break  # Exit loop if polling starts successfully
+            
+        except Conflict as e:
+            logger.error("🔴 Another instance is already running. Shutting down...")
+            break
+        except (TimedOut, NetworkError) as e:
+            attempt += 1
+            logger.error(f"🟡 Network error (attempt {attempt}/{max_retries}): {e}. Retrying in {retry_delay} seconds...")
+            if attempt < max_retries:
+                await asyncio.sleep(retry_delay)
+            else:
+                logger.error("🔴 Max retries reached. Bot failed to start.")
+                raise
+        except Exception as e:
+            logger.error(f"🔴 Critical error: {e}")
+            raise
+        finally:
+            bot_running = False
+            logger.info("🛑 Bot has been stopped")
+
+def run_flask():
+    """Run the Flask server for the dashboard."""
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), use_reloader=False)
+
+if __name__ == '__main__':
+    if not BOT_TOKEN:
+        logger.error("🔴 BOT_TOKEN is not set. Please set it in the .env file.")
+        exit(1)
+    
+    # Start Flask in a separate thread
+    flask_thread = Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
+    
+    # Run the bot in the main thread
+    asyncio.run(run_bot())
