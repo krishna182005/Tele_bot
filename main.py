@@ -1,5 +1,4 @@
-# main.py - Clean Version for python-telegram-bot v20+
-import sys; print("PYTHON VERSION:", sys.version)
+# main.py - Complete Working Version for Render (Flask + Telegram Bot)
 import asyncio
 import os
 import json
@@ -19,23 +18,24 @@ if not BOT_TOKEN:
     exit(1)
 
 # --- FLASK APP ---
-flask_app = Flask(__name__)
+app = Flask(__name__)
 
-@flask_app.route('/')
+@app.route('/')
 def home():
     return """
     <html>
         <head><title>Trusty Lads Bot</title></head>
         <body style="font-family: sans-serif; text-align: center; padding-top: 50px;">
             <h1>🤖 Trusty Lads Bot is Online!</h1>
-            <p>✅ Status: <strong style="color: green;">Running</strong></p>
+            <p>✅ Status: <strong style="color: green;">Running on Render</strong></p>
+            <p>Your Telegram bot is active and listening for messages.</p>
         </body>
     </html>
     """
 
-@flask_app.route('/health')
+@app.route('/health')
 def health_check():
-    return {"status": "healthy", "service": "trusty-lads-bot"}
+    return {"status": "healthy", "service": "trusty-lads-bot", "platform": "render"}
 
 # --- BOT DATA ---
 PRODUCTS = {
@@ -59,14 +59,15 @@ PRODUCTS = {
     ]
 }
 
+# Global state storage
 user_carts = {}
 user_states = {}
 os.makedirs("orders", exist_ok=True)
 
-# --- BOT HANDLERS (ALL ASYNC) ---
+# --- TELEGRAM BOT HANDLERS ---
 
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start command handler - ASYNC"""
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start command handler"""
     user_id = update.effective_user.id
     user_name = update.effective_user.first_name
     user_carts[user_id] = []
@@ -87,7 +88,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Help command handler - ASYNC"""
+    """Help command handler"""
     help_text = """
 🆘 *Help & Commands*
 /start - Start the bot & see the main menu
@@ -102,13 +103,13 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
 async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show product categories - ASYNC"""
+    """Show product categories"""
     keyboard = [[InlineKeyboardButton(f"📂 {category}", callback_data=f"cat_{category}")] for category in PRODUCTS.keys()]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("🛒 *Please choose a category:*", parse_mode='Markdown', reply_markup=reply_markup)
 
 async def show_products_in_category(query, category):
-    """Show products in selected category - ASYNC"""
+    """Show products in selected category"""
     keyboard = []
     text = f"📂 *Products in {category}:*\n\n"
     
@@ -121,7 +122,7 @@ async def show_products_in_category(query, category):
     await query.edit_message_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """View shopping cart - ASYNC"""
+    """View shopping cart"""
     user_id = update.effective_user.id
     cart = user_carts.get(user_id, [])
     
@@ -145,7 +146,7 @@ async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
 
 def add_to_cart(user_id, category, product_index):
-    """Add item to cart - SYNC (helper function)"""
+    """Add item to cart (helper function)"""
     if user_id not in user_carts:
         user_carts[user_id] = []
     
@@ -164,7 +165,7 @@ def add_to_cart(user_id, category, product_index):
     return f"{product_to_add['name']} added to cart."
 
 async def checkout(query):
-    """Start checkout process - ASYNC"""
+    """Start checkout process"""
     user_id = query.from_user.id
     if not user_carts.get(user_id):
         await query.answer("Your cart is empty!", show_alert=True)
@@ -183,7 +184,7 @@ Please provide your delivery details in a single message:
     await query.edit_message_text(text, parse_mode='Markdown')
 
 async def process_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Process order after checkout - ASYNC"""
+    """Process order after checkout"""
     user_id = update.effective_user.id
     cart = user_carts.get(user_id, [])
     order_details_text = update.message.text
@@ -202,6 +203,7 @@ async def process_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'status': 'Confirmed'
     }
     
+    # Save order to file
     orders_file = f"orders/user_{user_id}_orders.json"
     all_orders = []
     if os.path.exists(orders_file):
@@ -225,11 +227,12 @@ We will contact you shortly to confirm the delivery.
     """
     await update.message.reply_text(confirmation_text, parse_mode='Markdown')
     
+    # Clear cart and reset state
     user_carts[user_id] = []
     user_states[user_id] = "main_menu"
 
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle text messages - ASYNC"""
+    """Handle text messages"""
     user_id = update.effective_user.id
     text = update.message.text
 
@@ -242,18 +245,18 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif "View Cart" in text:
         await view_cart(update, context)
     elif "My Orders" in text:
-        await update.message.reply_text("Feature coming soon!")
+        await update.message.reply_text("📦 Feature coming soon! You'll be able to track all your orders here.")
     elif "About Us" in text:
-        await update.message.reply_text("Trusty Lads is your #1 source for premium lifestyle products.")
+        await update.message.reply_text("ℹ️ Trusty Lads is your #1 source for premium lifestyle products. Quality guaranteed!")
     elif "Contact Support" in text:
-        await update.message.reply_text("You can reach us at support@trustylads.com.")
+        await update.message.reply_text("📞 You can reach us at support@trustylads.com or call +91-XXXXXXXXXX")
     elif "Offers" in text:
-        await update.message.reply_text("No special offers right now, but check back soon!")
+        await update.message.reply_text("💰 No special offers right now, but check back soon for amazing deals!")
     else:
-        await update.message.reply_text("Sorry, I didn't understand that. Please use the menu buttons or type /start.")
+        await update.message.reply_text("❓ Sorry, I didn't understand that. Please use the menu buttons or type /start.")
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle inline button callbacks - ASYNC"""
+    """Handle inline button callbacks"""
     query = update.callback_query
     await query.answer()
     
@@ -281,58 +284,70 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "checkout":
         await checkout(query)
 
-# --- FLASK SERVER (RUNS IN THREAD) ---
-def run_flask_server():
-    """Run Flask server for health checks"""
-    port = int(os.environ.get('PORT', 10000))
-    try:
-        from waitress import serve
-        print(f"🌐 Flask server starting on port {port}")
-        serve(flask_app, host="0.0.0.0", port=port)
-    except ImportError:
-        print("⚠️ Waitress not found, using Flask dev server")
-        flask_app.run(host="0.0.0.0", port=port)
-
-# --- TELEGRAM BOT SETUP (MAIN ASYNC) ---
-async def run_telegram_bot():
-    """Setup and run Telegram bot in main async loop"""
-    print("🤖 Setting up Telegram bot...")
+# --- TELEGRAM BOT SETUP ---
+async def run_bot():
+    """Setup and run the Telegram bot"""
+    print("🤖 Starting Telegram Bot...")
     
-    # Create application
     application = ApplicationBuilder().token(BOT_TOKEN).build()
     
-    # Add all handlers
-    application.add_handler(CommandHandler("start", start_command))
+    # Add handlers
+    application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CallbackQueryHandler(button_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     
-    print("✅ Bot handlers registered, starting polling...")
+    print("✅ Bot handlers registered")
     
-    # Start bot polling (this is the main blocking call)
-    await application.run_polling(drop_pending_updates=True)
-
-# --- MAIN FUNCTION ---
-async def main():
-    """Main async function - starts both Flask and Telegram bot"""
-    print("🚀 Starting Trusty Lads Bot...")
+    # Initialize and start the bot
+    await application.initialize()
+    await application.start()
     
-    # Start Flask server in background thread
-    flask_thread = Thread(target=run_flask_server, daemon=True)
-    flask_thread.start()
-    print("✅ Flask server started in background")
+    # Start polling for updates
+    await application.updater.start_polling(drop_pending_updates=True)
     
-    # Start Telegram bot (main async task)
-    await run_telegram_bot()
-
-# --- ENTRY POINT ---
-if __name__ == '__main__':
+    print("🚀 Bot is now running and polling for messages!")
+    
+    # Keep the bot running
     try:
-        # Run the main async function
-        asyncio.run(main())
+        await application.updater.idle()
     except KeyboardInterrupt:
-        print("\n👋 Bot stopped by user")
+        print("⏹️ Bot stopped by user")
+    finally:
+        await application.stop()
+
+# --- FLASK + BOT RUNNER ---
+def run_flask():
+    """Run Flask server"""
+    port = int(os.environ.get('PORT', 5000))
+    print(f"🌐 Starting Flask server on port {port}")
+    
+    try:
+        from waitress import serve
+        serve(app, host='0.0.0.0', port=port)
+    except ImportError:
+        print("⚠️ Waitress not found, using Flask dev server")
+        app.run(host='0.0.0.0', port=port)
+
+def run_bot_in_thread():
+    """Run bot in new event loop"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(run_bot())
     except Exception as e:
-        print(f"❌ Fatal error: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"❌ Bot error: {e}")
+    finally:
+        loop.close()
+
+# --- MAIN EXECUTION ---
+if __name__ == '__main__':
+    print("🚀 Starting Trusty Lads Bot + Flask Server...")
+    
+    # Start bot in background thread
+    bot_thread = Thread(target=run_bot_in_thread, daemon=True)
+    bot_thread.start()
+    print("✅ Bot started in background thread")
+    
+    # Start Flask server (main thread)
+    run_flask()
