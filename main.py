@@ -1,28 +1,24 @@
-from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
-import json
-import datetime
-import os
 from flask import Flask
 from threading import Thread
+from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
 from dotenv import load_dotenv
+import os
+import json
+import datetime
 
-# Load environment variables from .env file
+# Load environment variables
 load_dotenv()
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# Your bot token from @BotFather (stored securely in .env file or environment)
-BOT_TOKEN = os.getenv('BOT_TOKEN', os.environ.get('BOT_TOKEN', 'PASTE_YOUR_TOKEN_HERE'))
-
-# Validate bot token
-if BOT_TOKEN == 'PASTE_YOUR_TOKEN_HERE' or not BOT_TOKEN:
-    print("❌ ERROR: Bot token not found!")
-    print("🔐 Please set BOT_TOKEN in environment variables or .env file")
+if not BOT_TOKEN:
+    print("❌ ERROR: BOT_TOKEN not found in environment variables!")
     exit(1)
 
-# Flask app for 24/7 hosting
-app_flask = Flask(__name__)
+# Flask app for keeping service alive on Render
+flask_app = Flask(__name__)
 
-@app_flask.route('/')
+@flask_app.route('/')
 def home():
     return """
     <html>
@@ -31,7 +27,7 @@ def home():
             <h1>🤖 Trusty Lads Bot is Online!</h1>
             <p>✅ Bot Status: <strong style="color: green;">Running</strong></p>
             <p>🕐 Last Check: <span id="time"></span></p>
-            <p>📱 Start chatting: <a href="https://t.me/YOUR_BOT_USERNAME">@YOUR_BOT_USERNAME</a></p>
+            <p>📱 Start chatting with the bot on Telegram!</p>
             <script>
                 document.getElementById('time').innerHTML = new Date().toLocaleString();
             </script>
@@ -39,17 +35,11 @@ def home():
     </html>
     """
 
-def run_flask():
-    app_flask.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+@flask_app.route('/health')
+def health():
+    return {"status": "healthy", "service": "trusty-lads-bot"}
 
-def keep_alive():
-    """Starts Flask server in a separate thread to keep bot alive 24/7"""
-    t = Thread(target=run_flask)
-    t.daemon = True
-    t.start()
-    print("🌐 Flask server started for 24/7 hosting!")
-
-# Enhanced Product Categories
+# Product catalog
 PRODUCTS = {
     "Hair Care": [
         {"name": "🖤 Hair Comb", "price": 199, "description": "Premium wooden hair comb"},
@@ -68,28 +58,18 @@ PRODUCTS = {
         {"name": "📱 Phone Case", "price": 299, "description": "Protective phone case"},
         {"name": "⌚ Smart Watch", "price": 1299, "description": "Fitness tracking smartwatch"},
         {"name": "🔌 Power Bank", "price": 699, "description": "10000mAh portable charger"}
-    ],
-    "Accessories": [
-        {"name": "👔 Tie", "price": 349, "description": "Silk formal tie"},
-        {"name": "🧢 Cap", "price": 199, "description": "Stylish baseball cap"},
-        {"name": "👓 Sunglasses", "price": 499, "description": "UV protection sunglasses"},
-        {"name": "💼 Wallet", "price": 599, "description": "Leather bi-fold wallet"}
     ]
 }
 
-# User cart storage (in production, use a database)
+# User data storage
 user_carts = {}
 user_states = {}
 
-# Create orders directory if it doesn't exist
-if not os.path.exists("orders"):
-    os.makedirs("orders")
+# Create orders directory
+os.makedirs("orders", exist_ok=True)
 
-# Handle /start command
+# Bot command handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.effective_user or not update.message:
-        return
-    
     user_id = update.effective_user.id
     user_carts[user_id] = []
     user_states[user_id] = "main_menu"
@@ -107,7 +87,6 @@ Your one-stop shop for:
 ✨ Premium Hair Care Products
 🧔 Professional Beard Care
 📱 Latest Electronics
-👔 Stylish Accessories
 
 Choose an option below to get started! 👇
     """
@@ -118,11 +97,7 @@ Choose an option below to get started! 👇
         reply_markup=ReplyKeyboardMarkup(buttons, resize_keyboard=True)
     )
 
-# Show product categories
 async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message:
-        return
-        
     keyboard = []
     for category in PRODUCTS.keys():
         keyboard.append([InlineKeyboardButton(f"📂 {category}", callback_data=f"cat_{category}")])
@@ -135,7 +110,6 @@ async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-# Show products in category
 async def show_products_in_category(query, category):
     keyboard = []
     text = f"📂 *{category} Products:*\n\n"
@@ -152,11 +126,7 @@ async def show_products_in_category(query, category):
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-# Handle cart operations
 async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.effective_user or not update.message:
-        return
-        
     user_id = update.effective_user.id
     cart = user_carts.get(user_id, [])
     
@@ -185,11 +155,7 @@ async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-# Show offers
 async def show_offers(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message:
-        return
-        
     offers_text = """
 🎉 *Current Offers & Deals!* 🎉
 
@@ -197,18 +163,12 @@ async def show_offers(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🎁 *NEWUSER* - 15% off for first-time buyers  
 🛍️ *COMBO50* - Buy 2 get 1 free on hair care products
 ⚡ *FLASH10* - Extra 10% off on electronics
-🎯 *BULK25* - 25% off on orders above ₹1000
 
 *Offer codes are valid till month end!*
     """
-    
     await update.message.reply_text(offers_text, parse_mode='Markdown')
 
-# Show about us
 async def about_us(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message:
-        return
-        
     about_text = """
 ℹ️ *About Trusty Lads*
 
@@ -220,7 +180,6 @@ async def about_us(update: Update, context: ContextTypes.DEFAULT_TYPE):
 📍 *Address:* 123 Fashion Street, Style City
 📞 *Phone:* +91-9876543210
 📧 *Email:* support@trustylads.com
-🌐 *Website:* www.trustylads.com
 
 ⭐ *Why Choose Us?*
 ✅ Genuine Products
@@ -228,14 +187,9 @@ async def about_us(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ✅ 24/7 Customer Support
 ✅ Easy Returns & Exchanges
     """
-    
     await update.message.reply_text(about_text, parse_mode='Markdown')
 
-# Contact support
 async def contact_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message:
-        return
-        
     contact_text = """
 📞 *Contact Support*
 
@@ -246,170 +200,10 @@ async def contact_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ⏰ *Support Hours:*
 Monday - Saturday: 9:00 AM - 8:00 PM
 Sunday: 10:00 AM - 6:00 PM
-
-📝 *For Order Issues:*
-Please provide your order ID and describe the issue.
-
-🔄 *For Returns/Exchanges:*
-Contact us within 7 days of delivery.
     """
-    
     await update.message.reply_text(contact_text, parse_mode='Markdown')
 
-# Handle checkout process
-async def checkout(query, user_id):
-    cart = user_carts.get(user_id, [])
-    if not cart:
-        await query.edit_message_text("🛍️ Your cart is empty!")
-        return
-    
-    user_states[user_id] = "awaiting_order_details"
-    
-    text = "📦 *Checkout Process*\n\n"
-    text += "Please provide the following details in this format:\n\n"
-    text += "*Name:* Your Full Name\n"
-    text += "*Phone:* Your Phone Number\n" 
-    text += "*Address:* Your Complete Address\n"
-    text += "*Payment:* COD/Online\n"
-    text += "*Offer Code:* (if any)\n\n"
-    text += "Example:\n"
-    text += "Name: John Doe\n"
-    text += "Phone: 9876543210\n"
-    text += "Address: 123 Main St, City, PIN\n"
-    text += "Payment: COD\n"
-    text += "Offer Code: FLAT20"
-    
-    await query.edit_message_text(text, parse_mode='Markdown')
-
-# Handle callback queries (inline button clicks)
-async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.callback_query or not update.effective_user:
-        return
-        
-    query = update.callback_query
-    user_id = update.effective_user.id
-    data = query.data
-    
-    if not data:
-        return
-    
-    await query.answer()
-    
-    if data == "back_main":
-        await start_callback(query)
-    elif data == "back_categories":
-        await show_categories_callback(query)
-    elif data.startswith("cat_"):
-        category = data.replace("cat_", "")
-        await show_products_in_category(query, category)
-    elif data.startswith("add_"):
-        parts = data.split("_")
-        if len(parts) >= 3:
-            category = parts[1]
-            try:
-                product_index = int(parts[2])
-                await add_to_cart(query, user_id, category, product_index)
-            except (ValueError, IndexError):
-                await query.edit_message_text("❌ Invalid product selection!")
-    elif data == "clear_cart":
-        user_carts[user_id] = []
-        await query.edit_message_text("🗑️ Cart cleared successfully!")
-    elif data == "checkout":
-        await checkout(query, user_id)
-
-# Add product to cart
-async def add_to_cart(query, user_id, category, product_index):
-    if user_id not in user_carts:
-        user_carts[user_id] = []
-    
-    product = PRODUCTS[category][product_index]
-    
-    # Check if product already in cart
-    for item in user_carts[user_id]:
-        if item['name'] == product['name']:
-            item['quantity'] += 1
-            await query.edit_message_text(f"✅ {product['name']} quantity updated in cart!")
-            return
-    
-    # Add new product to cart
-    user_carts[user_id].append({
-        'name': product['name'],
-        'price': product['price'],
-        'quantity': 1,
-        'category': category
-    })
-    
-    await query.edit_message_text(f"✅ {product['name']} added to cart!")
-
-# Callback versions for inline buttons
-async def start_callback(query):
-    welcome_text = """
-🌟 *Welcome to Trusty Lads!* 🌟
-
-Your one-stop shop for:
-✨ Premium Hair Care Products
-🧔 Professional Beard Care
-📱 Latest Electronics
-👔 Stylish Accessories
-
-Choose an option below to get started! 👇
-    """
-    
-    await query.edit_message_text(welcome_text, parse_mode='Markdown')
-
-async def show_categories_callback(query):
-    keyboard = []
-    for category in PRODUCTS.keys():
-        keyboard.append([InlineKeyboardButton(f"📂 {category}", callback_data=f"cat_{category}")])
-    
-    keyboard.append([InlineKeyboardButton("🔙 Back to Menu", callback_data="back_main")])
-    
-    await query.edit_message_text(
-        "🛒 *Choose a Product Category:*",
-        parse_mode='Markdown',
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
-# Enhanced message handler
-async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or not update.message.text or not update.effective_user:
-        return
-        
-    text = update.message.text
-    user_id = update.effective_user.id
-    user_state = user_states.get(user_id, "main_menu")
-
-    if "Browse Products" in text:
-        await show_categories(update, context)
-    
-    elif "View Cart" in text:
-        await view_cart(update, context)
-    
-    elif "About Us" in text:
-        await about_us(update, context)
-    
-    elif "Contact Support" in text:
-        await contact_support(update, context)
-    
-    elif "Offers" in text:
-        await show_offers(update, context)
-    
-    elif "My Orders" in text:
-        await show_my_orders(update, context)
-    
-    elif user_state == "awaiting_order_details":
-        await process_order(update, context, user_id, text)
-    
-    else:
-        await update.message.reply_text(
-            "🤔 I didn't understand that. Please use the menu buttons below or type /start to see all options."
-        )
-
-# Show user's order history
 async def show_my_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.effective_user or not update.message:
-        return
-        
     user_id = update.effective_user.id
     orders_file = f"orders/user_{user_id}_orders.json"
     
@@ -426,22 +220,39 @@ async def show_my_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         text = "📦 *Your Order History:*\n\n"
-        for order in orders[-5:]:  # Show last 5 orders
+        for order in orders[-3:]:  # Show last 3 orders
             text += f"🆔 *Order ID:* {order['order_id']}\n"
             text += f"📅 *Date:* {order['date']}\n"
             text += f"💰 *Total:* ₹{order['total']}\n"
             text += f"📋 *Status:* {order['status']}\n\n"
         
         await update.message.reply_text(text, parse_mode='Markdown')
-    
     except Exception:
         await update.message.reply_text("❌ Error loading orders. Please contact support.")
 
-# Process order details
-async def process_order(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id, order_details):
-    if not update.message:
+async def checkout(query, user_id):
+    cart = user_carts.get(user_id, [])
+    if not cart:
+        await query.edit_message_text("🛍️ Your cart is empty!")
         return
-        
+    
+    user_states[user_id] = "awaiting_order_details"
+    
+    text = "📦 *Checkout Process*\n\n"
+    text += "Please provide your details in this format:\n\n"
+    text += "*Name:* Your Full Name\n"
+    text += "*Phone:* Your Phone Number\n" 
+    text += "*Address:* Your Complete Address\n"
+    text += "*Payment:* COD/Online\n\n"
+    text += "Example:\n"
+    text += "Name: John Doe\n"
+    text += "Phone: 9876543210\n"
+    text += "Address: 123 Main St, City, PIN\n"
+    text += "Payment: COD"
+    
+    await query.edit_message_text(text, parse_mode='Markdown')
+
+async def process_order(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id, order_details):
     cart = user_carts.get(user_id, [])
     
     if not cart:
@@ -454,10 +265,8 @@ async def process_order(update: Update, context: ContextTypes.DEFAULT_TYPE, user
     # Generate order ID
     order_id = f"TL{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
     
-    # Get user name safely
-    user_name = "Unknown"
-    if update.effective_user and update.effective_user.first_name:
-        user_name = update.effective_user.first_name
+    # Get user name
+    user_name = update.effective_user.first_name or "Unknown"
     
     # Create order data
     order_data = {
@@ -518,11 +327,110 @@ async def process_order(update: Update, context: ContextTypes.DEFAULT_TYPE, user
     
     await update.message.reply_text(confirmation_text, parse_mode='Markdown')
 
-# Add help command
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message:
-        return
+async def add_to_cart(query, user_id, category, product_index):
+    if user_id not in user_carts:
+        user_carts[user_id] = []
+    
+    product = PRODUCTS[category][product_index]
+    
+    # Check if product already in cart
+    for item in user_carts[user_id]:
+        if item['name'] == product['name']:
+            item['quantity'] += 1
+            await query.edit_message_text(f"✅ {product['name']} quantity updated in cart!")
+            return
+    
+    # Add new product to cart
+    user_carts[user_id].append({
+        'name': product['name'],
+        'price': product['price'],
+        'quantity': 1,
+        'category': category
+    })
+    
+    await query.edit_message_text(f"✅ {product['name']} added to cart!")
+
+# Callback query handler
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = update.effective_user.id
+    data = query.data
+    
+    await query.answer()
+    
+    if data == "back_main":
+        welcome_text = """
+🌟 *Welcome to Trusty Lads!* 🌟
+
+Your one-stop shop for:
+✨ Premium Hair Care Products
+🧔 Professional Beard Care
+📱 Latest Electronics
+
+Choose an option below to get started! 👇
+        """
+        await query.edit_message_text(welcome_text, parse_mode='Markdown')
+    
+    elif data == "back_categories":
+        keyboard = []
+        for category in PRODUCTS.keys():
+            keyboard.append([InlineKeyboardButton(f"📂 {category}", callback_data=f"cat_{category}")])
+        keyboard.append([InlineKeyboardButton("🔙 Back to Menu", callback_data="back_main")])
         
+        await query.edit_message_text(
+            "🛒 *Choose a Product Category:*",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    
+    elif data.startswith("cat_"):
+        category = data.replace("cat_", "")
+        await show_products_in_category(query, category)
+    
+    elif data.startswith("add_"):
+        parts = data.split("_")
+        if len(parts) >= 3:
+            category = parts[1]
+            try:
+                product_index = int(parts[2])
+                await add_to_cart(query, user_id, category, product_index)
+            except (ValueError, IndexError):
+                await query.edit_message_text("❌ Invalid product selection!")
+    
+    elif data == "clear_cart":
+        user_carts[user_id] = []
+        await query.edit_message_text("🗑️ Cart cleared successfully!")
+    
+    elif data == "checkout":
+        await checkout(query, user_id)
+
+# Message handler
+async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    user_id = update.effective_user.id
+    user_state = user_states.get(user_id, "main_menu")
+
+    if "Browse Products" in text:
+        await show_categories(update, context)
+    elif "View Cart" in text:
+        await view_cart(update, context)
+    elif "About Us" in text:
+        await about_us(update, context)
+    elif "Contact Support" in text:
+        await contact_support(update, context)
+    elif "Offers" in text:
+        await show_offers(update, context)
+    elif "My Orders" in text:
+        await show_my_orders(update, context)
+    elif user_state == "awaiting_order_details":
+        await process_order(update, context, user_id, text)
+    else:
+        await update.message.reply_text(
+            "🤔 I didn't understand that. Please use the menu buttons below or type /start to see all options."
+        )
+
+# Help command
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = """
 🆘 *Help & Commands*
 
@@ -540,13 +448,15 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 *Need Help?*
 Use 📞 Contact Support for assistance!
     """
-    
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
 # Telegram bot function
 def run_telegram_bot():
-    """Run the Telegram bot in a separate thread"""
+    """Run the Telegram bot"""
     try:
+        print("🤖 Starting Telegram bot...")
+        
+        # Create application
         application = ApplicationBuilder().token(BOT_TOKEN).build()
         
         # Add handlers
@@ -555,42 +465,30 @@ def run_telegram_bot():
         application.add_handler(CallbackQueryHandler(button_callback))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
         
-        print("🤖 Trusty Lads Bot is running...")
+        print("✅ Telegram bot handlers registered")
+        print("🚀 Bot is now running...")
+        
+        # Start polling
         application.run_polling(drop_pending_updates=True)
         
     except Exception as e:
         print(f"❌ Error starting Telegram bot: {e}")
-        print("🔍 Check if your BOT_TOKEN is correct")
 
-# Main function
-def main():
-    print("🔐 Checking bot token...")
-    
-    # Verify token is properly loaded
-    if not BOT_TOKEN or BOT_TOKEN == 'PASTE_YOUR_TOKEN_HERE':
-        print("❌ Bot token not found!")
-        return
-    
-    print("✅ Bot token loaded successfully!")
-    
-    # Start Flask server for 24/7 hosting
-    keep_alive()
+# Flask function
+def run_flask():
+    """Run Flask web server"""
+    port = int(os.environ.get('PORT', 10000))
+    print(f"🌐 Starting Flask server on port {port}...")
+    flask_app.run(host="0.0.0.0", port=port, debug=False)
+
+# Main execution
+if __name__ == '__main__':
+    print("🔐 Bot token loaded successfully!")
+    print("🚀 Starting Trusty Lads Bot services...")
     
     # Start Telegram bot in a separate thread
-    bot_thread = Thread(target=run_telegram_bot)
-    bot_thread.daemon = True
+    bot_thread = Thread(target=run_telegram_bot, daemon=True)
     bot_thread.start()
     
-    print("🌐 Bot is running on multiple platforms:")
-    print("   • Telegram Bot: ✅ Active")
-    print("   • Web Server: ✅ Active")
-    print("   • Ready for 24/7 hosting!")
-    
-    # Keep the main thread alive
-    try:
-        bot_thread.join()
-    except KeyboardInterrupt:
-        print("\n👋 Bot stopped by user")
-
-if __name__ == "__main__":
-    main()
+    # Start Flask server (this will block and keep the app alive)
+    run_flask()
