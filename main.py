@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 import os
 import json
 import datetime
+import traceback
 
 # Load environment variables
 load_dotenv()
@@ -68,9 +69,7 @@ user_states = {}
 # Create orders directory
 os.makedirs("orders", exist_ok=True)
 
-# ======================
 # MAIN MENU BUTTONS
-# ======================
 def get_main_menu_keyboard():
     return ReplyKeyboardMarkup(
         [
@@ -82,14 +81,12 @@ def get_main_menu_keyboard():
         one_time_keyboard=False
     )
 
-# ======================
 # BOT HANDLERS
-# ======================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_carts[user_id] = []
     user_states[user_id] = "main_menu"
-    
+
     welcome_text = """
 🌟 *Welcome to Trusty Lads!* 🌟
 
@@ -100,7 +97,6 @@ Your one-stop shop for:
 
 Use the buttons below to navigate our store!
     """
-    
     await update.message.reply_text(
         welcome_text,
         parse_mode='Markdown',
@@ -111,9 +107,7 @@ async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = []
     for category in PRODUCTS.keys():
         keyboard.append([InlineKeyboardButton(f"📂 {category}", callback_data=f"cat_{category}")])
-    
     keyboard.append([InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")])
-    
     await update.message.reply_text(
         "🛍️ *Browse Our Categories:*",
         parse_mode='Markdown',
@@ -123,39 +117,44 @@ async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def show_products_in_category(query, category):
     keyboard = []
     text = f"📂 *{category} Products:*\n\n"
-    
     for i, product in enumerate(PRODUCTS[category]):
         text += f"{i+1}. {product['name']} - ₹{product['price']}\n   _{product['description']}_\n\n"
         keyboard.append([InlineKeyboardButton(f"➕ Add {product['name']}", callback_data=f"add_{category}_{i}")])
-    
     keyboard.append([InlineKeyboardButton("🔙 Back to Categories", callback_data="back_categories")])
     keyboard.append([InlineKeyboardButton("🛒 View Cart", callback_data="view_cart")])
-    
     await query.edit_message_text(
         text,
         parse_mode='Markdown',
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+async def view_cart(update_or_query, context: ContextTypes.DEFAULT_TYPE):
+    # Can be called from both message and callback_query
+    if hasattr(update_or_query, 'message') and update_or_query.message:
+        user_id = update_or_query.effective_user.id
+    else:
+        user_id = update_or_query.from_user.id
     cart = user_carts.get(user_id, [])
-    
     if not cart:
-        await update.message.reply_text(
-            "🛒 Your cart is empty! Browse products to add items.",
-            reply_markup=get_main_menu_keyboard())
+        if hasattr(update_or_query, 'message') and update_or_query.message:
+            await update_or_query.message.reply_text(
+                "🛒 Your cart is empty! Browse products to add items.",
+                reply_markup=get_main_menu_keyboard())
+        else:
+            await update_or_query.edit_message_text(
+                "🛒 Your cart is empty! Browse products to add items.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🛍️ Browse Products", callback_data="back_categories")],
+                    [InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")]
+                ])
+            )
         return
-    
     text = "🛒 *Your Shopping Cart:*\n\n"
     total = 0
-    
     for i, item in enumerate(cart):
         text += f"{i+1}. {item['name']} - ₹{item['price']} × {item['quantity']}\n"
         total += item['price'] * item['quantity']
-    
     text += f"\n💰 *Total: ₹{total}*"
-    
     keyboard = [
         [InlineKeyboardButton("➖ Remove Item", callback_data="remove_item"),
          InlineKeyboardButton("➕ Add More", callback_data="add_more")],
@@ -163,14 +162,13 @@ async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
          InlineKeyboardButton("💳 Checkout", callback_data="checkout")],
         [InlineKeyboardButton("🔙 Continue Shopping", callback_data="back_categories")]
     ]
-    
-    if isinstance(update, Update):
-        await update.message.reply_text(
+    if hasattr(update_or_query, 'message') and update_or_query.message:
+        await update_or_query.message.reply_text(
             text,
             parse_mode='Markdown',
             reply_markup=InlineKeyboardMarkup(keyboard))
     else:
-        await update.edit_message_text(
+        await update_or_query.edit_message_text(
             text,
             parse_mode='Markdown',
             reply_markup=InlineKeyboardMarkup(keyboard))
@@ -186,13 +184,11 @@ async def show_offers(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 Use these codes at checkout!
     """
-    
     keyboard = [
         [InlineKeyboardButton("🛍️ Browse Products", callback_data="back_categories")],
         [InlineKeyboardButton("🛒 View Cart", callback_data="view_cart")],
         [InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")]
     ]
-    
     await update.message.reply_text(
         offers_text,
         parse_mode='Markdown',
@@ -217,19 +213,17 @@ async def about_us(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ✅ 24/7 Support
 ✅ Easy Returns
     """
-    
     keyboard = [
         [InlineKeyboardButton("🛍️ Start Shopping", callback_data="back_categories")],
         [InlineKeyboardButton("📞 Contact Support", callback_data="contact_support")],
         [InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")]
     ]
-    
     await update.message.reply_text(
         about_text,
         parse_mode='Markdown',
         reply_markup=InlineKeyboardMarkup(keyboard))
 
-async def contact_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def contact_support(update_or_query, context: ContextTypes.DEFAULT_TYPE):
     contact_text = """
 📞 *Contact Our Support Team*
 
@@ -242,69 +236,109 @@ async def contact_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
 📍 *Address:* 
 123 Fashion Street, Style City
     """
-    
     keyboard = [
         [InlineKeyboardButton("🛍️ Browse Products", callback_data="back_categories")],
         [InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")]
     ]
-    
-    await update.message.reply_text(
-        contact_text,
-        parse_mode='Markdown',
-        reply_markup=InlineKeyboardMarkup(keyboard))
+    # Support can be called from both a message and a callback_query
+    if hasattr(update_or_query, 'message') and update_or_query.message:
+        await update_or_query.message.reply_text(
+            contact_text,
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(keyboard))
+    else:
+        await update_or_query.edit_message_text(
+            contact_text,
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(keyboard))
 
-async def show_my_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+async def show_my_orders(update_or_query, context: ContextTypes.DEFAULT_TYPE):
+    if hasattr(update_or_query, 'message') and update_or_query.message:
+        user_id = update_or_query.effective_user.id
+    else:
+        user_id = update_or_query.from_user.id
+
     orders_file = f"orders/user_{user_id}_orders.json"
-    
     if not os.path.exists(orders_file):
-        await update.message.reply_text(
-            "📦 You haven't placed any orders yet!",
-            reply_markup=get_main_menu_keyboard())
+        if hasattr(update_or_query, 'message') and update_or_query.message:
+            await update_or_query.message.reply_text(
+                "📦 You haven't placed any orders yet!",
+                reply_markup=get_main_menu_keyboard())
+        else:
+            await update_or_query.edit_message_text(
+                "📦 You haven't placed any orders yet!",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🛍️ Shop Again", callback_data="back_categories")],
+                    [InlineKeyboardButton("📞 Contact Support", callback_data="contact_support")],
+                    [InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")]
+                ])
+            )
         return
-    
     try:
         with open(orders_file, 'r') as f:
             orders = json.load(f)
-        
         if not orders:
-            await update.message.reply_text(
-                "📦 You haven't placed any orders yet!",
-                reply_markup=get_main_menu_keyboard())
+            if hasattr(update_or_query, 'message') and update_or_query.message:
+                await update_or_query.message.reply_text(
+                    "📦 You haven't placed any orders yet!",
+                    reply_markup=get_main_menu_keyboard())
+            else:
+                await update_or_query.edit_message_text(
+                    "📦 You haven't placed any orders yet!",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("🛍️ Shop Again", callback_data="back_categories")],
+                        [InlineKeyboardButton("📞 Contact Support", callback_data="contact_support")],
+                        [InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")]
+                    ])
+                )
             return
-        
         text = "📦 *Your Recent Orders:*\n\n"
-        for order in orders[-3:]:  # Show last 3 orders
+        for order in orders[-3:]:
             text += f"🆔 *Order ID:* {order['order_id']}\n"
             text += f"📅 *Date:* {order['date']}\n"
             text += f"💰 *Total:* ₹{order['total']}\n"
             text += f"📋 *Status:* {order['status']}\n\n"
-        
         keyboard = [
             [InlineKeyboardButton("🛍️ Shop Again", callback_data="back_categories")],
             [InlineKeyboardButton("📞 Contact Support", callback_data="contact_support")],
             [InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")]
         ]
-        
-        await update.message.reply_text(
-            text,
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(keyboard))
+        if hasattr(update_or_query, 'message') and update_or_query.message:
+            await update_or_query.message.reply_text(
+                text,
+                parse_mode='Markdown',
+                reply_markup=InlineKeyboardMarkup(keyboard))
+        else:
+            await update_or_query.edit_message_text(
+                text,
+                parse_mode='Markdown',
+                reply_markup=InlineKeyboardMarkup(keyboard))
     except Exception:
-        await update.message.reply_text(
-            "❌ Error loading orders. Please contact support.",
-            reply_markup=get_main_menu_keyboard())
+        if hasattr(update_or_query, 'message') and update_or_query.message:
+            await update_or_query.message.reply_text(
+                "❌ Error loading orders. Please contact support.",
+                reply_markup=get_main_menu_keyboard())
+        else:
+            await update_or_query.edit_message_text(
+                "❌ Error loading orders. Please contact support.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📞 Contact Support", callback_data="contact_support")],
+                    [InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")]
+                ])
+            )
 
 async def checkout(query, user_id):
     cart = user_carts.get(user_id, [])
     if not cart:
         await query.edit_message_text(
             "🛒 Your cart is empty!",
-            reply_markup=get_main_menu_keyboard())
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🛍️ Browse Products", callback_data="back_categories")],
+                [InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")]
+            ])
+        )
         return
-    
     user_states[user_id] = "awaiting_order_details"
-    
     text = "💳 *Checkout Process*\n\n"
     text += "Please send your details in this format:\n\n"
     text += "Name: Your Full Name\n"
@@ -316,12 +350,10 @@ async def checkout(query, user_id):
     text += "Phone: 9876543210\n"
     text += "Address: 123 Main St, City, PIN\n"
     text += "Payment: COD"
-    
     keyboard = [
         [InlineKeyboardButton("🔙 Back to Cart", callback_data="view_cart")],
         [InlineKeyboardButton("🏠 Main Menu", callback_data="back_main")]
     ]
-    
     await query.edit_message_text(
         text,
         parse_mode='Markdown',
@@ -329,23 +361,14 @@ async def checkout(query, user_id):
 
 async def process_order(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id, order_details):
     cart = user_carts.get(user_id, [])
-    
     if not cart:
         await update.message.reply_text(
             "🛒 Your cart is empty!",
             reply_markup=get_main_menu_keyboard())
         return
-    
-    # Calculate total
     total = sum(item['price'] * item['quantity'] for item in cart)
-    
-    # Generate order ID
     order_id = f"TL{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
-    
-    # Get user name
     user_name = update.effective_user.first_name or "Customer"
-    
-    # Create order data
     order_data = {
         'order_id': order_id,
         'user_id': user_id,
@@ -356,21 +379,14 @@ async def process_order(update: Update, context: ContextTypes.DEFAULT_TYPE, user
         'customer_details': order_details,
         'status': 'Confirmed'
     }
-    
-    # Save order to file
     orders_file = f"orders/user_{user_id}_orders.json"
     orders = []
-    
     if os.path.exists(orders_file):
         with open(orders_file, 'r') as f:
             orders = json.load(f)
-    
     orders.append(order_data)
-    
     with open(orders_file, 'w') as f:
         json.dump(orders, f, indent=2)
-    
-    # Save to admin orders file
     with open("orders/all_orders.txt", "a", encoding='utf-8') as f:
         f.write(f"\n{'='*50}\n")
         f.write(f"ORDER ID: {order_id}\n")
@@ -383,12 +399,8 @@ async def process_order(update: Update, context: ContextTypes.DEFAULT_TYPE, user
             f.write(f"- {item['name']} ×{item['quantity']} = ₹{item['price'] * item['quantity']}\n")
         f.write(f"TOTAL: ₹{total}\n")
         f.write(f"{'='*50}\n")
-    
-    # Clear cart and reset state
     user_carts[user_id] = []
     user_states[user_id] = "main_menu"
-    
-    # Send confirmation
     confirmation_text = f"""
 ✅ *Order Confirmed!* ✅
 
@@ -401,13 +413,11 @@ async def process_order(update: Update, context: ContextTypes.DEFAULT_TYPE, user
 
 *Thank you for shopping with Trusty Lads!* 🙏
     """
-    
     keyboard = [
         [InlineKeyboardButton("🛍️ Shop More", callback_data="back_categories")],
         [InlineKeyboardButton("📦 My Orders", callback_data="my_orders")],
         [InlineKeyboardButton("🏠 Main Menu", callback_data="back_main")]
     ]
-    
     await update.message.reply_text(
         confirmation_text,
         parse_mode='Markdown',
@@ -416,10 +426,7 @@ async def process_order(update: Update, context: ContextTypes.DEFAULT_TYPE, user
 async def add_to_cart(query, user_id, category, product_index):
     if user_id not in user_carts:
         user_carts[user_id] = []
-    
     product = PRODUCTS[category][product_index]
-    
-    # Check if product already in cart
     for item in user_carts[user_id]:
         if item['name'] == product['name']:
             item['quantity'] += 1
@@ -431,15 +438,12 @@ async def add_to_cart(query, user_id, category, product_index):
                 ])
             )
             return
-    
-    # Add new product to cart
     user_carts[user_id].append({
         'name': product['name'],
         'price': product['price'],
         'quantity': 1,
         'category': category
     })
-    
     await query.edit_message_text(
         f"✅ {product['name']} added to your cart!",
         reply_markup=InlineKeyboardMarkup([
@@ -448,37 +452,29 @@ async def add_to_cart(query, user_id, category, product_index):
         ])
     )
 
-# Callback query handler
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = update.effective_user.id
     data = query.data
-    
     await query.answer()
-    
     if data == "back_main":
         await query.edit_message_text(
             "🏠 *Main Menu* - What would you like to do?",
             parse_mode='Markdown',
             reply_markup=get_main_menu_keyboard())
-    
     elif data == "back_categories":
         keyboard = []
         for category in PRODUCTS.keys():
             keyboard.append([InlineKeyboardButton(f"📂 {category}", callback_data=f"cat_{category}")])
-        
         keyboard.append([InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")])
-        
         await query.edit_message_text(
             "🛍️ *Browse Our Categories:*",
             parse_mode='Markdown',
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
-    
     elif data.startswith("cat_"):
         category = data.replace("cat_", "")
         await show_products_in_category(query, category)
-    
     elif data.startswith("add_"):
         parts = data.split("_")
         if len(parts) >= 3:
@@ -488,10 +484,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await add_to_cart(query, user_id, category, product_index)
             except (ValueError, IndexError):
                 await query.edit_message_text("❌ Invalid product selection!")
-    
     elif data == "view_cart":
         await view_cart(query, context)
-    
     elif data == "clear_cart":
         user_carts[user_id] = []
         await query.edit_message_text(
@@ -501,25 +495,19 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")]
             ])
         )
-    
     elif data == "checkout":
         await checkout(query, user_id)
-    
     elif data == "contact_support":
         await contact_support(query, context)
-    
     elif data == "my_orders":
         await show_my_orders(query, context)
-    
     elif data == "special_offers":
         await show_offers(query, context)
 
-# Message handler
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
     user_state = user_states.get(user_id, "main_menu")
-
     if "🛍️ Browse Products" in text:
         await show_categories(update, context)
     elif "🛒 View Cart" in text:
@@ -539,44 +527,35 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🤔 I didn't understand that. Please use the menu buttons below:",
             reply_markup=get_main_menu_keyboard())
 
-# Telegram bot function
 def run_telegram_bot():
-    """Run the Telegram bot"""
+    """Run the Telegram bot (in its own thread)"""
     try:
         print("🤖 Starting Telegram bot...")
-        
-        # Create application
         application = ApplicationBuilder().token(BOT_TOKEN).build()
-        
-        # Add handlers
         application.add_handler(CommandHandler("start", start))
         application.add_handler(CallbackQueryHandler(button_callback))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
-        
         print("✅ Telegram bot handlers registered")
         print("🚀 Bot is now running...")
-        
-        # Start polling
         application.run_polling(drop_pending_updates=True)
-        
     except Exception as e:
         print(f"❌ Error starting Telegram bot: {e}")
+        traceback.print_exc()
 
-# Flask function
 def run_flask():
-    """Run Flask web server"""
+    """Run Flask web server (production: via waitress if available, else fallback to Flask)"""
     port = int(os.environ.get('PORT', 10000))
     print(f"🌐 Starting Flask server on port {port}...")
-    flask_app.run(host="0.0.0.0", port=port, debug=False)
+    try:
+        from waitress import serve
+        serve(flask_app, host="0.0.0.0", port=port)
+    except ImportError:
+        print("waitress not installed, running Flask in development mode")
+        flask_app.run(host="0.0.0.0", port=port, debug=False)
 
-# Main execution
 if __name__ == '__main__':
     print("🔐 Bot token loaded successfully!")
     print("🚀 Starting Trusty Lads Bot services...")
-    
-    # Start Telegram bot in a separate thread
     bot_thread = Thread(target=run_telegram_bot, daemon=True)
     bot_thread.start()
-    
-    # Start Flask server (this will block and keep the app alive)
     run_flask()
