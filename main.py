@@ -1,3 +1,4 @@
+# main.py
 from flask import Flask
 from threading import Thread
 from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
@@ -20,20 +21,15 @@ flask_app = Flask(__name__)
 
 @flask_app.route('/')
 def home():
-    return """
-    <html>
-        <head><title>Trusty Lads Bot</title></head>
-        <body style="font-family: Arial; text-align: center; margin-top: 50px;">
-            <h1>🤖 Trusty Lads Bot is Online!</h1>
-            <p>✅ Bot Status: <strong style="color: green;">Running</strong></p>
-            <p>🕐 Last Check: <span id="time"></span></p>
-            <p>📱 Start chatting with the bot on Telegram!</p>
-            <script>
-                document.getElementById('time').innerHTML = new Date().toLocaleString();
-            </script>
-        </body>
-    </html>
-    """
+    return "✅ Trusty Lads Bot is Live and Running!"
+
+# ... (all your other functions like PRODUCTS, start, view_cart, etc. go here)
+# Copy the entire first code block from our previous conversation here.
+# It is the correct and complete version.
+
+# ---- PASTE THE FULL E-COMMERCE BOT CODE HERE ----
+
+# Let's re-paste the full bot code to be 100% sure:
 
 @flask_app.route('/health')
 def health():
@@ -286,7 +282,10 @@ async def process_order(update: Update, context: ContextTypes.DEFAULT_TYPE, user
     
     if os.path.exists(orders_file):
         with open(orders_file, 'r') as f:
-            orders = json.load(f)
+            try:
+                orders = json.load(f)
+            except json.JSONDecodeError:
+                orders = []
     
     orders.append(order_data)
     
@@ -337,7 +336,7 @@ async def add_to_cart(query, user_id, category, product_index):
     for item in user_carts[user_id]:
         if item['name'] == product['name']:
             item['quantity'] += 1
-            await query.edit_message_text(f"✅ {product['name']} quantity updated in cart!")
+            await query.answer(f"✅ {product['name']} quantity updated in cart!")
             return
     
     # Add new product to cart
@@ -348,7 +347,7 @@ async def add_to_cart(query, user_id, category, product_index):
         'category': category
     })
     
-    await query.edit_message_text(f"✅ {product['name']} added to cart!")
+    await query.answer(f"✅ {product['name']} added to cart!")
 
 # Callback query handler
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -356,19 +355,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     data = query.data
     
-    await query.answer()
+    await query.answer() # Answer callback query quickly
     
     if data == "back_main":
-        welcome_text = """
-🌟 *Welcome to Trusty Lads!* 🌟
-
-Your one-stop shop for:
-✨ Premium Hair Care Products
-🧔 Professional Beard Care
-📱 Latest Electronics
-
-Choose an option below to get started! 👇
-        """
+        # This case is tricky as we can't edit a message to show ReplyKeyboard.
+        # It's better to send a new message or handle this flow differently.
+        # For now, let's just edit the text.
+        welcome_text = "Choose an option from the main menu below 👇"
         await query.edit_message_text(welcome_text, parse_mode='Markdown')
     
     elif data == "back_categories":
@@ -389,14 +382,12 @@ Choose an option below to get started! 👇
     
     elif data.startswith("add_"):
         parts = data.split("_")
-        if len(parts) >= 3:
-            category = parts[1]
-            try:
-                product_index = int(parts[2])
-                await add_to_cart(query, user_id, category, product_index)
-            except (ValueError, IndexError):
-                await query.edit_message_text("❌ Invalid product selection!")
-    
+        category = parts[1]
+        product_index = int(parts[2])
+        await add_to_cart(query, user_id, category, product_index)
+        # after adding, show the same product list again so user can add more
+        await show_products_in_category(query, category)
+
     elif data == "clear_cart":
         user_carts[user_id] = []
         await query.edit_message_text("🗑️ Cart cleared successfully!")
@@ -450,45 +441,37 @@ Use 📞 Contact Support for assistance!
     """
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
-# Telegram bot function
 def run_telegram_bot():
     """Run the Telegram bot"""
     try:
         print("🤖 Starting Telegram bot...")
-        
-        # Create application
         application = ApplicationBuilder().token(BOT_TOKEN).build()
         
-        # Add handlers
         application.add_handler(CommandHandler("start", start))
         application.add_handler(CommandHandler("help", help_command))
         application.add_handler(CallbackQueryHandler(button_callback))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
         
         print("✅ Telegram bot handlers registered")
-        print("🚀 Bot is now running...")
-        
-        # Start polling
+        print("🚀 Bot is now polling...")
         application.run_polling(drop_pending_updates=True)
         
     except Exception as e:
         print(f"❌ Error starting Telegram bot: {e}")
 
-# Flask function
 def run_flask():
     """Run Flask web server"""
     port = int(os.environ.get('PORT', 10000))
     print(f"🌐 Starting Flask server on port {port}...")
-    flask_app.run(host="0.0.0.0", port=port, debug=False)
+    # Use a production-ready WSGI server like Gunicorn or Waitress instead of flask_app.run() in production
+    from waitress import serve
+    serve(flask_app, host="0.0.0.0", port=port)
 
-# Main execution
 if __name__ == '__main__':
     print("🔐 Bot token loaded successfully!")
     print("🚀 Starting Trusty Lads Bot services...")
     
-    # Start Telegram bot in a separate thread
     bot_thread = Thread(target=run_telegram_bot, daemon=True)
     bot_thread.start()
     
-    # Start Flask server (this will block and keep the app alive)
     run_flask()
