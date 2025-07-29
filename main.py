@@ -332,8 +332,10 @@ Your premium destination for quality products, now in India! 🛍️
 🚀 **Shopping Made Easy:**
 • Browse our complete catalog
 • Add items to your cart instantly
-• Secure checkout with COD
+• Secure checkout with COD & Online Payments
 • Track your orders in real-time
+
+🎁 **Special Offer:** Use code **WELCOME20** for 20% off your first order!
 
 👆 *Use the menu buttons below to start shopping!*
     """
@@ -365,6 +367,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 3. **Add to Cart** - Click "Add to Cart" buttons
 4. **Checkout** - Go to "🛍️ View Cart" and checkout
 5. **Track** - Use "📦 My Orders" to track delivery
+
+**🎁 Promo Codes (INR):**
+• WELCOME20 - 20% off first order
+• DIWALI150 - ₹150 off on orders ₹1500+
+• BULK1000 - 15% off on orders ₹1000+
+• PREMIUM2000 - 20% off on orders ₹2000+
 
 Need more help? Use "📞 Contact Support"!
     """
@@ -732,41 +740,48 @@ async def process_checkout_step(update: Update, context: ContextTypes.DEFAULT_TY
             await update.message.reply_text("Please enter a valid address.")
             return
         session['checkout_data']['address'] = message_text
-        session['current_context'] = "checkout_payment"
+        session['current_context'] = "checkout_review" # Changed to review step
+        
+        # Display all collected details for review
+        review_text = "📝 **Please review your details:**\n\n"
+        review_text += f"**Name:** {session['checkout_data'].get('full_name', 'N/A')}\n"
+        review_text += f"**Phone:** {session['checkout_data'].get('phone', 'N/A')}\n"
+        review_text += f"**Address:** {session['checkout_data'].get('address', 'N/A')}\n\n"
+        review_text += "If any correction is needed, please enter **all the details again** in one message (Name, Phone, Address with Pincode), or confirm to proceed to payment."
+        
         keyboard = [
-            [InlineKeyboardButton("💰 Cash on Delivery (COD)", callback_data="payment_cod")],
-            # [InlineKeyboardButton("💳 Online Payment", callback_data="payment_online")] # COMMENTED OUT
+            [InlineKeyboardButton("✅ Confirm Details", callback_data="confirm_details")],
+            [InlineKeyboardButton("✏️ Re-enter Details", callback_data="re_enter_details")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(f"✅ Address: {message_text}\n\n💳 Please select your **payment method**:", parse_mode='Markdown', reply_markup=reply_markup)
+        
+        await update.message.reply_text(review_text, parse_mode='Markdown', reply_markup=reply_markup)
     
-    # elif current_context == "checkout_promo": # COMMENTED OUT PROMO CODE HANDLING
-    #     promo_code = message_text.upper()
-    #     if promo_code in ACTIVE_OFFERS:
-    #         offer = ACTIVE_OFFERS[promo_code]
-    #         cart_total = calculate_cart_total(user_id)
+    elif current_context == "checkout_review" and message_text.lower() != "confirm details":
+        # User is re-entering details after a mistake
+        # Assuming the re-entered details will be in the format "Name, Phone, Address"
+        parts = message_text.split(',')
+        if len(parts) >= 3:
+            session['checkout_data']['full_name'] = parts[0].strip()
+            session['checkout_data']['phone'] = parts[1].strip()
+            session['checkout_data']['address'] = ",".join(parts[2:]).strip()
             
-    #         if cart_total >= offer['min_order']:
-    #             discount_amount = 0
-    #             if "discount" in offer: # Percentage discount
-    #                 discount_amount = cart_total * (offer['discount'] / 100)
-    #             elif "discount_amount" in offer: # Fixed amount discount
-    #                 discount_amount = offer['discount_amount']
-                
-    #             final_total = cart_total - discount_amount
-                
-    #             session['checkout_data']['promo_code'] = promo_code
-    #             session['checkout_data']['discount'] = discount_amount
-    #             session['checkout_data']['final_total'] = final_total
-                
-    #             await finalize_order(update, context)
-    #         else:
-    #             await update.message.reply_text(f"❌ Minimum order of ₹{offer['min_order']:.2f} required for this promo code.\n\nType 'SKIP' to proceed without promo code or enter a different code:")
-    #     elif promo_code == "SKIP":
-    #         session['checkout_data']['final_total'] = calculate_cart_total(user_id)
-    #         await finalize_order(update, context)
-    #     else:
-    #         await update.message.reply_text("❌ Invalid promo code. Type 'SKIP' to proceed without promo code or enter a valid code:")
+            review_text = "📝 **Details updated. Please review again:**\n\n"
+            review_text += f"**Name:** {session['checkout_data'].get('full_name', 'N/A')}\n"
+            review_text += f"**Phone:** {session['checkout_data'].get('phone', 'N/A')}\n"
+            review_text += f"**Address:** {session['checkout_data'].get('address', 'N/A')}\n\n"
+            review_text += "If any correction is needed, please enter **all the details again** in one message (Name, Phone, Address with Pincode), or confirm to proceed to payment."
+            
+            keyboard = [
+                [InlineKeyboardButton("✅ Confirm Details", callback_data="confirm_details")],
+                [InlineKeyboardButton("✏️ Re-enter Details", callback_data="re_enter_details")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await update.message.reply_text(review_text, parse_mode='Markdown', reply_markup=reply_markup)
+        else:
+            await update.message.reply_text("Invalid format. Please enter **all details** as 'Name, Phone, Address with Pincode' or click 'Confirm Details'.")
+
 
 async def handle_payment_selection(update: Update, payment_method: str):
     query = update.callback_query
@@ -866,6 +881,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     data = query.data
     user_id = query.from_user.id
+    session = get_user_session(user_id)
     
     try:
         if data.startswith("category_"):
@@ -884,7 +900,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 category_id, product_id = parts[2], "_".join(parts[3:])
                 # Directly add to cart if no details are expected for this product,
                 # otherwise the message handler for 'add_to_cart_details' will pick it up
-                session = get_user_session(user_id)
                 if session.get('current_context') != "add_to_cart_details":
                     await handle_add_to_cart(update, context, category_id, product_id)
                 else: # User clicked "Add to Cart" but was expecting details input
@@ -910,6 +925,23 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         elif data == "start_checkout":
             await start_checkout(update, context)
+        
+        elif data == "confirm_details":
+            session['current_context'] = "checkout_payment"
+            keyboard = [
+                [InlineKeyboardButton("💰 Cash on Delivery (COD)", callback_data="payment_cod")],
+                # [InlineKeyboardButton("💳 Online Payment", callback_data="payment_online")] # COMMENTED OUT
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(
+                f"✅ Details Confirmed!\n\n💳 Please select your **payment method**:", 
+                parse_mode='Markdown', 
+                reply_markup=reply_markup
+            )
+            
+        elif data == "re_enter_details":
+            session['current_context'] = "checkout_name" # Go back to the first step
+            await query.edit_message_text("Okay, let's re-enter your details. Please provide your **full name** again:")
         
         elif data.startswith("payment_"):
             payment_method = "Cash on Delivery" # Only COD option remains
