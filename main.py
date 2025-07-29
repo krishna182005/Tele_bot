@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 # --- ENVIRONMENT SETUP ---
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-print(f"🔍 BOT_TOKEN found: {'Yes' if BOT_TOKEN else 'No'}")
+logger.info(f"🔍 BOT_TOKEN found: {'Yes' if BOT_TOKEN else 'No'}")
 
 # --- GLOBAL STATE ---
 bot_running = False
@@ -33,8 +33,6 @@ user_orders = {}
 order_counter = 1000
 
 # --- E-COMMERCE DATA (INDIAN CONTEXT) ---
-
-# PRODUCT CATALOG WITH CUSTOMIZABLE OPTIONS
 PRODUCT_CATALOG = {
     "electronics": {
         "name": "📱 Electronics",
@@ -74,7 +72,6 @@ PRODUCT_CATALOG = {
     }
 }
 
-# AVAILABLE OPTIONS FOR CUSTOMIZATION
 CUSTOMIZATION_OPTIONS = {
     "size": ["XS", "S", "M", "L", "XL", "XXL"],
     "color": ["Black", "White", "Red", "Blue", "Green", "Yellow", "Pink", "Purple", "Gray", "Brown"],
@@ -84,7 +81,6 @@ CUSTOMIZATION_OPTIONS = {
     "strap": ["Leather", "Metal", "Silicone", "Fabric"]
 }
 
-# HIDDEN PROMO CODES (NOT SHOWN TO USER)
 ACTIVE_OFFERS = {
     "INDIAAFFIRM": {"discount": 10, "description": "10% off on all orders", "min_order": 0},
     "FESTIVESAVE": {"discount_amount": 500, "description": "₹500 off on orders above ₹5000", "min_order": 5000},
@@ -94,7 +90,6 @@ ACTIVE_OFFERS = {
     "SAVE1000": {"discount_amount": 1000, "description": "₹1000 off on orders above ₹15000", "min_order": 15000},
 }
 
-# COMPANY INFORMATION
 COMPANY_INFO = {
     "name": "TrustyLads®",
     "mission": "Providing premium quality products for the modern lifestyle with uncompromising standards, delivered across India.",
@@ -218,7 +213,6 @@ def add_to_cart(user_id, category, product_id, customizations=None):
     cart = get_user_cart(user_id)
     custom_key_part = ""
     if customizations:
-        # Create a sorted, consistent key for customizations
         sorted_customs = sorted(customizations.items())
         custom_key_part = "_" + "_".join([f"{k}-{v}" for k, v in sorted_customs])
     
@@ -408,7 +402,7 @@ async def my_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[InlineKeyboardButton("🛒 Start Shopping", callback_data="browse_products")]]
     else:
         orders_text = "📦 **Your Recent Orders**\n\n"
-        for order in orders[-5:]: # Show last 5 orders
+        for order in orders[-5:]:  # Show last 5 orders
             order_date = datetime.fromisoformat(order['date']).strftime("%B %d, %Y")
             orders_text += f"🔸 **Order {order['order_id']}**\n"
             orders_text += f"   *Date*: {order_date}\n"
@@ -467,10 +461,11 @@ Our team is here to help with order issues, product questions, or any other inqu
 
 *Use the buttons below to contact us directly!*
     """
-    clean_phone = re.sub(r'\D', '', COMPANY_INFO['whatsapp'])
+    clean_tel_phone = COMPANY_INFO['phone'].replace(' ', '')  # Remove spaces for tel: URL
+    clean_wa_phone = re.sub(r'\D', '', COMPANY_INFO['whatsapp'])  # Remove non-digits for WhatsApp
     keyboard = [
-        [InlineKeyboardButton("📞 Call Now", url=f"tel:{COMPANY_INFO['phone']}")],
-        [InlineKeyboardButton("💬 WhatsApp", url=f"https://wa.me/{clean_phone}")],
+        [InlineKeyboardButton("📞 Call Now", url=f"tel:{clean_tel_phone}")],
+        [InlineKeyboardButton("💬 WhatsApp", url=f"https://wa.me/{clean_wa_phone}")],
         [InlineKeyboardButton("📧 Send Email", url=f"mailto:{COMPANY_INFO['email']}")],
         [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="back_to_menu")]
     ]
@@ -481,8 +476,12 @@ Our team is here to help with order issues, product questions, or any other inqu
         await update.message.reply_text(support_text, parse_mode='Markdown', reply_markup=reply_markup)
 
 # --- BOT CALLBACK & MESSAGE HANDLERS ---
-async def handle_category_selection(update: Update, category_id: str):
+async def handle_category_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, category_id: str):
     query = update.callback_query
+    if category_id not in PRODUCT_CATALOG:
+        await query.edit_message_text("❌ Invalid category. Please try again.")
+        return
+    
     category_data = PRODUCT_CATALOG[category_id]
     
     keyboard = [
@@ -495,8 +494,12 @@ async def handle_category_selection(update: Update, category_id: str):
     category_text = f"🛒 **{category_data['name']}**\n\nSelect a product to view details and customize:"
     await query.edit_message_text(category_text, parse_mode='Markdown', reply_markup=reply_markup)
 
-async def handle_product_selection(update: Update, category_id: str, product_id: str):
+async def handle_product_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, category_id: str, product_id: str):
     query = update.callback_query
+    if category_id not in PRODUCT_CATALOG or product_id not in PRODUCT_CATALOG[category_id]["products"]:
+        await query.edit_message_text("❌ Invalid product or category. Please try again.")
+        return
+    
     product = PRODUCT_CATALOG[category_id]["products"][product_id]
     
     product_text = f"📦 **{product['name']}**\n\n"
@@ -517,11 +520,15 @@ async def handle_product_selection(update: Update, category_id: str, product_id:
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(product_text, parse_mode='Markdown', reply_markup=reply_markup)
 
-async def handle_product_customization(update: Update, category_id: str, product_id: str):
+async def handle_product_customization(update: Update, context: ContextTypes.DEFAULT_TYPE, category_id: str, product_id: str):
     query = update.callback_query
     user_id = query.from_user.id
-    session = get_user_session(user_id)
     
+    if category_id not in PRODUCT_CATALOG or product_id not in PRODUCT_CATALOG[category_id]["products"]:
+        await query.edit_message_text("❌ Invalid product or category. Please try again.")
+        return
+    
+    session = get_user_session(user_id)
     product = PRODUCT_CATALOG[category_id]["products"][product_id]
     customizable_options = product.get('customizable', [])
     
@@ -532,6 +539,7 @@ async def handle_product_customization(update: Update, category_id: str, product
         'current_option_index': 0,
         'selections': {}
     }
+    logger.info(f"Starting customization for user {user_id}: {category_id}/{product_id}")
     await show_customization_option(update, context)
 
 async def show_customization_option(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -539,10 +547,14 @@ async def show_customization_option(update: Update, context: ContextTypes.DEFAUL
     user_id = query.from_user.id
     session = get_user_session(user_id)
     
-    custom_data = session['customization_data']
+    custom_data = session.get('customization_data', {})
+    if not custom_data:
+        await query.edit_message_text("❌ Session expired. Please try again.", 
+                                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛒 Start Shopping", callback_data="browse_products")]]))
+        return
+    
     idx = custom_data['current_option_index']
     
-    # If all options are selected, add to cart
     if idx >= len(custom_data['options']):
         await add_customized_product_to_cart(update, context)
         return
@@ -553,12 +565,16 @@ async def show_customization_option(update: Update, context: ContextTypes.DEFAUL
     custom_text = f"🎨 **Customize {product['name']}**\n\n"
     custom_text += f"*Step {idx + 1} of {len(custom_data['options'])}: Select {option_type.title()}*\n\n"
     
-    # Show previous selections
     if custom_data['selections']:
         selections_str = ", ".join([f"{k.title()}: {v}" for k, v in custom_data['selections'].items()])
         custom_text += f"✅ *Current choice(s): {selections_str}*\n\n"
 
     options = CUSTOMIZATION_OPTIONS.get(option_type, [])
+    if not options:
+        logger.error(f"No options found for option_type: {option_type}")
+        await query.edit_message_text("❌ Error: No customization options available for this product. Please try again.")
+        return
+    
     keyboard = [
         [InlineKeyboardButton(opt, callback_data=f"select_{option_type}_{opt}")] for opt in options
     ]
@@ -567,16 +583,21 @@ async def show_customization_option(update: Update, context: ContextTypes.DEFAUL
     
     await query.edit_message_text(custom_text, parse_mode='Markdown', reply_markup=reply_markup)
 
-async def handle_customization_selection(update: Update, option_type: str, selected_value: str):
+async def handle_customization_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, option_type: str, selected_value: str):
     query = update.callback_query
     user_id = query.from_user.id
     session = get_user_session(user_id)
     
-    custom_data = session['customization_data']
+    custom_data = session.get('customization_data', {})
+    if not custom_data:
+        await query.edit_message_text("❌ Session expired. Please try again.", 
+                                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛒 Start Shopping", callback_data="browse_products")]]))
+        return
+    
     custom_data['selections'][option_type] = selected_value
     custom_data['current_option_index'] += 1
-    
-    await show_customization_option(update, None)
+    logger.info(f"User {user_id} selected {option_type}: {selected_value}")
+    await show_customization_option(update, context)
 
 async def add_customized_product_to_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -595,7 +616,7 @@ async def add_customized_product_to_cart(update: Update, context: ContextTypes.D
     added_item = add_to_cart(user_id, category_id, product_id, selections)
     await show_add_to_cart_confirmation(query, added_item, user_id)
 
-async def handle_add_to_cart(update: Update, category_id: str, product_id: str):
+async def handle_add_to_cart(update: Update, context: ContextTypes.DEFAULT_TYPE, category_id: str, product_id: str):
     query = update.callback_query
     user_id = query.from_user.id
     added_item = add_to_cart(user_id, category_id, product_id)
@@ -720,7 +741,7 @@ async def show_checkout_confirmation(update: Update, context: ContextTypes.DEFAU
     
     await update.message.reply_text(confirmation_text, parse_mode='Markdown', reply_markup=reply_markup)
 
-async def handle_payment_selection(update: Update, payment_method: str):
+async def handle_payment_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, payment_method: str):
     query = update.callback_query
     user_id = query.from_user.id
     session = get_user_session(user_id)
@@ -760,7 +781,6 @@ async def finalize_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     session['current_context'] = "main_menu"
     session['checkout_data'] = {}
 
-    # Build final confirmation message
     confirmation_text = f"✅ **Order Confirmed!**\n\n"
     confirmation_text += f"Thank you for your purchase, {order_data['full_name']}.\n\n"
     confirmation_text += f"**Order ID:** `{order_id}`\n"
@@ -792,20 +812,21 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     
     try:
+        logger.info(f"Processing callback data: {data}")
         if data.startswith("category_"):
-            await handle_category_selection(update, data.split("_", 1)[1])
+            await handle_category_selection(update, context, data.split("_", 1)[1])
         elif data.startswith("product_"):
             _, category_id, product_id = data.split("_", 2)
-            await handle_product_selection(update, category_id, product_id)
+            await handle_product_selection(update, context, category_id, product_id)
         elif data.startswith("customize_"):
             _, category_id, product_id = data.split("_", 2)
-            await handle_product_customization(update, category_id, product_id)
+            await handle_product_customization(update, context, category_id, product_id)
         elif data.startswith("select_"):
             _, option_type, selected_value = data.split("_", 2)
-            await handle_customization_selection(update, option_type, selected_value)
+            await handle_customization_selection(update, context, option_type, selected_value)
         elif data.startswith("add_cart_"):
             _, category_id, product_id = data.split("_", 2)
-            await handle_add_to_cart(update, category_id, product_id)
+            await handle_add_to_cart(update, context, category_id, product_id)
         elif data == "browse_products":
             await browse_products(update, context)
         elif data == "view_cart":
@@ -813,7 +834,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif data == "clear_cart":
             clear_user_cart(user_id)
             await query.edit_message_text("🗑️ **Cart Cleared!**", parse_mode='Markdown', 
-                                          reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛒 Start Shopping", callback_data="browse_products")]]))
+                                         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛒 Start Shopping", callback_data="browse_products")]]))
         elif data == "start_checkout":
             await start_checkout(update, context)
         elif data == "confirm_details":
@@ -823,12 +844,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]
             await query.edit_message_text("💳 Please select your payment method:", reply_markup=InlineKeyboardMarkup(keyboard))
         elif data == "make_corrections":
-            get_user_session(user_id)['current_context'] = "main_menu" # Reset context
+            get_user_session(user_id)['current_context'] = "main_menu"
             await query.message.delete()
-            await start_command(update, context) # Restart the process
+            await start_command(update, context)
         elif data.startswith("payment_"):
             if data == "payment_COD":
-                await handle_payment_selection(update, "Cash on Delivery (COD)")
+                await handle_payment_selection(update, context, "Cash on Delivery (COD)")
             else:
                 await query.answer("This payment method is not yet available.", show_alert=True)
         elif data == "contact_support":
@@ -840,20 +861,18 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await my_orders(update, context)
         elif data == "about_us":
             await about_us(update, context)
-
     except Exception as e:
         logger.error(f"Error in button_callback: {e}", exc_info=True)
         try:
             await query.edit_message_text("❌ An unexpected error occurred. Please try again or type /start to reset.")
         except:
-            pass # Message might have been deleted
+            pass
 
 async def handle_menu_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message_text = update.message.text
     user_id = update.effective_user.id
     session = get_user_session(user_id)
     
-    # Prioritize checkout context over menu buttons
     if 'checkout' in session.get('current_context', ''):
         await process_checkout_step(update, context)
         return
@@ -888,7 +907,6 @@ async def run_bot_async():
 
     application = ApplicationBuilder().token(BOT_TOKEN).build()
     
-    # Add handlers
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CallbackQueryHandler(button_callback))
