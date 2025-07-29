@@ -76,13 +76,13 @@ PRODUCT_CATALOG = {
 }
 
 
-# OFFERS AND PROMO CODES (Values in INR)
+# OFFERS AND PROMO CODES (Values in INR) - COMMENTED OUT
 ACTIVE_OFFERS = {
-    "WELCOME20": {"discount": 20, "description": "20% off for new customers", "min_order": 0},
-    "DIWALI150": {"discount_amount": 150, "description": "₹150 off on orders above ₹1500", "min_order": 1500},
-    "BULK1000": {"discount": 15, "description": "15% off on orders above ₹1000", "min_order": 1000},
-    "PREMIUM2000": {"discount": 20, "description": "20% off on orders above ₹2000", "min_order": 2000},
-    "STUDENT30": {"discount": 30, "description": "30% student discount", "min_order": 0},
+    # "WELCOME20": {"discount": 20, "description": "20% off for new customers", "min_order": 0},
+    # "DIWALI150": {"discount_amount": 150, "description": "₹150 off on orders above ₹1500", "min_order": 1500},
+    # "BULK1000": {"discount": 15, "description": "15% off on orders above ₹1000", "min_order": 1000},
+    # "PREMIUM2000": {"discount": 20, "description": "20% off on orders above ₹2000", "min_order": 2000},
+    # "STUDENT30": {"discount": 30, "description": "30% student discount", "min_order": 0},
 }
 
 
@@ -228,7 +228,7 @@ def get_user_cart(user_id):
         user_carts[user_id] = {}
     return user_carts[user_id]
 
-def add_to_cart(user_id, category, product_id):
+def add_to_cart(user_id, category, product_id, details=None):
     cart = get_user_cart(user_id)
     item_key = f"{category}_{product_id}"
     
@@ -241,7 +241,8 @@ def add_to_cart(user_id, category, product_id):
             "price": product["price"],
             "quantity": 1,
             "category": category,
-            "product_id": product_id
+            "product_id": product_id,
+            "details": details # Store additional details
         }
     return cart[item_key]
 
@@ -290,7 +291,10 @@ def save_order(user_id, order_data):
             f.write(f"Payment: {order_data.get('payment_method', 'N/A')}\n")
             f.write("Items:\n")
             for item in order_data.get('items', []):
-                f.write(f"  - {item['name']} x{item['quantity']} (₹{item['price']:.2f})\n")
+                f.write(f"  - {item['name']} x{item['quantity']} (₹{item['price']:.2f})")
+                if item.get('details'):
+                    f.write(f" [Details: {item['details']}]")
+                f.write("\n")
             f.write("-" * 30 + "\n")
     except Exception as e:
         logger.error(f"Error appending to all_orders_in.txt: {e}")
@@ -328,10 +332,8 @@ Your premium destination for quality products, now in India! 🛍️
 🚀 **Shopping Made Easy:**
 • Browse our complete catalog
 • Add items to your cart instantly
-• Secure checkout with COD & Online Payments
+• Secure checkout with COD
 • Track your orders in real-time
-
-🎁 **Special Offer:** Use code **WELCOME20** for 20% off your first order!
 
 👆 *Use the menu buttons below to start shopping!*
     """
@@ -363,12 +365,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 3. **Add to Cart** - Click "Add to Cart" buttons
 4. **Checkout** - Go to "🛍️ View Cart" and checkout
 5. **Track** - Use "📦 My Orders" to track delivery
-
-**🎁 Promo Codes (INR):**
-• WELCOME20 - 20% off first order
-• DIWALI150 - ₹150 off on orders ₹1500+
-• BULK1000 - 15% off on orders ₹1000+
-• PREMIUM2000 - 20% off on orders ₹2000+
 
 Need more help? Use "📞 Contact Support"!
     """
@@ -428,7 +424,10 @@ async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
         item_total = item["price"] * item["quantity"]
         total += item_total
         cart_text += f"• **{item['name']}**\n"
-        cart_text += f"  Quantity: {item['quantity']} × ₹{item['price']:.2f} = ₹{item_total:.2f}\n\n"
+        cart_text += f"  Quantity: {item['quantity']} × ₹{item['price']:.2f} = ₹{item_total:.2f}\n"
+        if item.get('details'):
+            cart_text += f"  Details: {item['details']}\n"
+        cart_text += "\n"
     
     cart_text += f"💰 **Total: ₹{total:.2f}**"
     
@@ -619,19 +618,19 @@ async def handle_product_selection(update: Update, category_id: str, product_id:
     product_text += "• Fast shipping across India\n"
     product_text += "• 30-day money back guarantee\n"
     product_text += "• Secure payment processing\n\n"
-    product_text += "Ready to add this to your cart?"
+    product_text += "Kindly enter your preferred size, color, and any additional details for your product."
     
+    session = get_user_session(query.from_user.id)
+    session['current_context'] = "add_to_cart_details"
+    session['temp_product_selection'] = {"category_id": category_id, "product_id": product_id}
+
     await query.edit_message_text(product_text, parse_mode='Markdown', reply_markup=reply_markup)
 
-async def handle_add_to_cart(update: Update, category_id: str, product_id: str):
-    query = update.callback_query
-    user_id = query.from_user.id
+async def handle_add_to_cart(update: Update, context: ContextTypes.DEFAULT_TYPE, category_id: str, product_id: str, details: str = None):
+    # This function is now called from message_handler for details or directly from callback if no details needed.
+    user_id = update.effective_user.id
     
-    if category_id not in PRODUCT_CATALOG or product_id not in PRODUCT_CATALOG[category_id]["products"]:
-        await query.edit_message_text("❌ Product not found. Please try again.")
-        return
-    
-    added_item = add_to_cart(user_id, category_id, product_id)
+    added_item = add_to_cart(user_id, category_id, product_id, details)
     cart_total = calculate_cart_total(user_id)
     cart_count = sum(item["quantity"] for item in get_user_cart(user_id).values())
     
@@ -645,13 +644,18 @@ async def handle_add_to_cart(update: Update, category_id: str, product_id: str):
     success_text = f"✅ **Added to Cart!**\n\n"
     success_text += f"**{added_item['name']}**\n"
     success_text += f"Quantity: {added_item['quantity']}\n"
-    success_text += f"Price: ₹{added_item['price']:.2f}\n\n"
-    success_text += f"🛍️ **Cart Summary:**\n"
+    success_text += f"Price: ₹{added_item['price']:.2f}\n"
+    if added_item.get('details'):
+        success_text += f"Details: {added_item['details']}\n"
+    success_text += f"\n🛍️ **Cart Summary:**\n"
     success_text += f"Items: {cart_count}\n"
     success_text += f"Total: ₹{cart_total:.2f}\n\n"
     success_text += "What would you like to do next?"
     
-    await query.edit_message_text(success_text, parse_mode='Markdown', reply_markup=reply_markup)
+    if hasattr(update, 'callback_query') and update.callback_query:
+        await update.callback_query.edit_message_text(success_text, parse_mode='Markdown', reply_markup=reply_markup)
+    else: # This is from a message, so reply directly
+        await update.message.reply_text(success_text, parse_mode='Markdown', reply_markup=reply_markup)
 
 # --- CHECKOUT PROCESS ---
 async def start_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -673,15 +677,17 @@ async def start_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for item in cart.values():
         item_total = item["price"] * item["quantity"]
         total += item_total
-        cart_summary += f"• {item['name']} x{item['quantity']} - ₹{item_total:.2f}\n"
+        cart_summary += f"• {item['name']} x{item['quantity']} - ₹{item_total:.2f}"
+        if item.get('details'):
+            cart_summary += f" [Details: {item['details']}]"
+        cart_summary += "\n"
     
     cart_summary += f"\n💰 **Subtotal: ₹{total:.2f}**\n\n"
     cart_summary += "📝 **Checkout Process:**\n"
     cart_summary += "1. Full Name ←\n"
     cart_summary += "2. Phone Number\n"
     cart_summary += "3. Delivery Address (with Pincode)\n"
-    cart_summary += "4. Payment Method\n"
-    cart_summary += "5. Promo Code (Optional)\n\n"
+    cart_summary += "4. Payment Method\n\n"
     cart_summary += "Please enter your **full name**:"
     
     await query.edit_message_text(cart_summary, parse_mode='Markdown')
@@ -692,6 +698,18 @@ async def process_checkout_step(update: Update, context: ContextTypes.DEFAULT_TY
     message_text = update.message.text.strip()
     
     current_context = session.get('current_context')
+
+    if current_context == "add_to_cart_details":
+        if 'temp_product_selection' in session:
+            category_id = session['temp_product_selection']['category_id']
+            product_id = session['temp_product_selection']['product_id']
+            details = message_text # Store the entered details
+            await handle_add_to_cart(update, context, category_id, product_id, details)
+            session['current_context'] = "main_menu" # Reset context
+            session.pop('temp_product_selection', None) # Clear temp data
+        else:
+            await update.message.reply_text("I couldn't find the product details. Please try Browse again.")
+        return
     
     if current_context == "checkout_name":
         if not message_text:
@@ -717,38 +735,38 @@ async def process_checkout_step(update: Update, context: ContextTypes.DEFAULT_TY
         session['current_context'] = "checkout_payment"
         keyboard = [
             [InlineKeyboardButton("💰 Cash on Delivery (COD)", callback_data="payment_cod")],
-            [InlineKeyboardButton("💳 Online Payment", callback_data="payment_online")]
+            # [InlineKeyboardButton("💳 Online Payment", callback_data="payment_online")] # COMMENTED OUT
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(f"✅ Address: {message_text}\n\n💳 Please select your **payment method**:", parse_mode='Markdown', reply_markup=reply_markup)
     
-    elif current_context == "checkout_promo":
-        promo_code = message_text.upper()
-        if promo_code in ACTIVE_OFFERS:
-            offer = ACTIVE_OFFERS[promo_code]
-            cart_total = calculate_cart_total(user_id)
+    # elif current_context == "checkout_promo": # COMMENTED OUT PROMO CODE HANDLING
+    #     promo_code = message_text.upper()
+    #     if promo_code in ACTIVE_OFFERS:
+    #         offer = ACTIVE_OFFERS[promo_code]
+    #         cart_total = calculate_cart_total(user_id)
             
-            if cart_total >= offer['min_order']:
-                discount_amount = 0
-                if "discount" in offer: # Percentage discount
-                    discount_amount = cart_total * (offer['discount'] / 100)
-                elif "discount_amount" in offer: # Fixed amount discount
-                    discount_amount = offer['discount_amount']
+    #         if cart_total >= offer['min_order']:
+    #             discount_amount = 0
+    #             if "discount" in offer: # Percentage discount
+    #                 discount_amount = cart_total * (offer['discount'] / 100)
+    #             elif "discount_amount" in offer: # Fixed amount discount
+    #                 discount_amount = offer['discount_amount']
                 
-                final_total = cart_total - discount_amount
+    #             final_total = cart_total - discount_amount
                 
-                session['checkout_data']['promo_code'] = promo_code
-                session['checkout_data']['discount'] = discount_amount
-                session['checkout_data']['final_total'] = final_total
+    #             session['checkout_data']['promo_code'] = promo_code
+    #             session['checkout_data']['discount'] = discount_amount
+    #             session['checkout_data']['final_total'] = final_total
                 
-                await finalize_order(update, context)
-            else:
-                await update.message.reply_text(f"❌ Minimum order of ₹{offer['min_order']:.2f} required for this promo code.\n\nType 'SKIP' to proceed without promo code or enter a different code:")
-        elif promo_code == "SKIP":
-            session['checkout_data']['final_total'] = calculate_cart_total(user_id)
-            await finalize_order(update, context)
-        else:
-            await update.message.reply_text("❌ Invalid promo code. Type 'SKIP' to proceed without promo code or enter a valid code:")
+    #             await finalize_order(update, context)
+    #         else:
+    #             await update.message.reply_text(f"❌ Minimum order of ₹{offer['min_order']:.2f} required for this promo code.\n\nType 'SKIP' to proceed without promo code or enter a different code:")
+    #     elif promo_code == "SKIP":
+    #         session['checkout_data']['final_total'] = calculate_cart_total(user_id)
+    #         await finalize_order(update, context)
+    #     else:
+    #         await update.message.reply_text("❌ Invalid promo code. Type 'SKIP' to proceed without promo code or enter a valid code:")
 
 async def handle_payment_selection(update: Update, payment_method: str):
     query = update.callback_query
@@ -759,19 +777,14 @@ async def handle_payment_selection(update: Update, payment_method: str):
     # The current implementation proceeds directly for demonstration.
     
     session['checkout_data']['payment_method'] = payment_method
-    session['current_context'] = "checkout_promo"
     
-    promo_text = f"✅ Payment Method: {payment_method}\n\n"
-    promo_text += "🎁 **Enter a promo code** for additional discounts or type **SKIP** to continue:\n\n"
-    promo_text += "**Available Codes:**\n"
-    
-    for code, offer in ACTIVE_OFFERS.items():
-        promo_text += f"• **{code}** - {offer['description']}\n"
-    
-    await query.edit_message_text(promo_text, parse_mode='Markdown')
+    # Removed promo code step, directly finalize order
+    session['checkout_data']['final_total'] = calculate_cart_total(user_id)
+    await finalize_order(query, context) # Pass query instead of update.message
 
-async def finalize_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+async def finalize_order(update_obj: Update, context: ContextTypes.DEFAULT_TYPE):
+    # This function now accepts either Update (from message) or CallbackQuery (from query)
+    user_id = update_obj.effective_user.id
     session = get_user_session(user_id)
     cart = get_user_cart(user_id)
     checkout_data = session.get('checkout_data', {})
@@ -780,7 +793,13 @@ async def finalize_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     subtotal = 0
     
     for item in cart.values():
-        cart_items.append({"name": item["name"], "price": item["price"], "quantity": item["quantity"], "total": item["price"] * item["quantity"]})
+        cart_items.append({
+            "name": item["name"], 
+            "price": item["price"], 
+            "quantity": item["quantity"], 
+            "total": item["price"] * item["quantity"],
+            "details": item.get("details") # Include details in order data
+        })
         subtotal += item["price"] * item["quantity"]
     
     final_total = checkout_data.get('final_total', subtotal)
@@ -809,7 +828,10 @@ async def finalize_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     confirmation_text += "📦 **Items Ordered:**\n"
     for item in cart_items:
-        confirmation_text += f"• {item['name']} x{item['quantity']} - ₹{item['total']:.2f}\n"
+        confirmation_text += f"• {item['name']} x{item['quantity']} - ₹{item['total']:.2f}"
+        if item.get('details'):
+            confirmation_text += f" [Details: {item['details']}]"
+        confirmation_text += "\n"
     
     confirmation_text += f"\n💰 **Order Total:**\n"
     confirmation_text += f"Subtotal: ₹{subtotal:.2f}\n"
@@ -831,7 +853,11 @@ async def finalize_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text(confirmation_text, parse_mode='Markdown', reply_markup=reply_markup)
+    if hasattr(update_obj, 'callback_query') and update_obj.callback_query:
+        await update_obj.callback_query.edit_message_text(confirmation_text, parse_mode='Markdown', reply_markup=reply_markup)
+    else:
+        await update_obj.message.reply_text(confirmation_text, parse_mode='Markdown', reply_markup=reply_markup)
+
 
 # --- MAIN CALLBACK QUERY HANDLER ---
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -856,8 +882,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parts = data.split("_")
             if len(parts) >= 4:
                 category_id, product_id = parts[2], "_".join(parts[3:])
-                await handle_add_to_cart(update, category_id, product_id)
-        
+                # Directly add to cart if no details are expected for this product,
+                # otherwise the message handler for 'add_to_cart_details' will pick it up
+                session = get_user_session(user_id)
+                if session.get('current_context') != "add_to_cart_details":
+                    await handle_add_to_cart(update, context, category_id, product_id)
+                else: # User clicked "Add to Cart" but was expecting details input
+                    await query.edit_message_text("Please enter the size, color, or other details first, then click 'Add to Cart' again or send the details as a message.")
+
         elif data == "browse_products":
             await browse_products(update, context)
         
@@ -880,7 +912,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await start_checkout(update, context)
         
         elif data.startswith("payment_"):
-            payment_method = "Cash on Delivery" if data == "payment_cod" else "Online Payment"
+            payment_method = "Cash on Delivery" # Only COD option remains
             await handle_payment_selection(update, payment_method)
         
         elif data == "contact_support":
@@ -917,11 +949,22 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error in button_callback: {e}")
         await query.edit_message_text("❌ An error occurred. Please try again.")
 
-# --- MESSAGE HANDLER FOR MENU BUTTONS ---
+# --- MESSAGE HANDLER FOR MENU BUTTONS AND PRODUCT DETAILS ---
 async def handle_menu_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message_text = update.message.text
     user_id = update.effective_user.id
     session = get_user_session(user_id)
+    
+    # Handle product details input
+    if session.get('current_context') == "add_to_cart_details":
+        if 'temp_product_selection' in session:
+            category_id = session['temp_product_selection']['category_id']
+            product_id = session['temp_product_selection']['product_id']
+            details = message_text # User sent the details
+            await handle_add_to_cart(update, context, category_id, product_id, details)
+            session['current_context'] = "main_menu" # Reset context after handling details
+            session.pop('temp_product_selection', None) # Clear temp data
+            return
     
     if session.get('current_context', '').startswith('checkout'):
         await process_checkout_step(update, context)
