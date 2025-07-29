@@ -396,7 +396,7 @@ Our team is ready to help you.
     keyboard = [
         [InlineKeyboardButton("📞 Call Now", url=f"tel:{COMPANY_INFO['phone']}")],
         [InlineKeyboardButton("💬 WhatsApp", url=f"https://wa.me/{clean_phone}")],
-        [InlineKeyboardButton("📧 Send Email", url=f"mailto:{COMPANY_INFO['email}")]
+        [InlineKeyboardButton("📧 Send Email", url=f"mailto:{COMPANY_INFO['email']}")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
